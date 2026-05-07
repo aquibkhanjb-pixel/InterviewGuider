@@ -60,7 +60,23 @@ class RedditScraper(BaseScraper):
             'UrbanClap': ['urbanclap', 'urban clap', 'urbancompany', 'urban company'],
             'Cred': ['cred', 'cred.com'],
             'Unacademy': ['unacademy', 'unacademy.com'],
-            'Vedantu': ['vedantu', 'vedantu.com']
+            'Vedantu': ['vedantu', 'vedantu.com'],
+
+            # IT Services & Consulting
+            'TCS': ['tcs', 'tata consultancy', 'tata consultancy services'],
+            'Infosys': ['infosys', 'infy'],
+            'Wipro': ['wipro', 'wipro technologies'],
+            'Capgemini': ['capgemini', 'cap gemini'],
+            'HCL': ['hcl', 'hcl technologies', 'hcltech'],
+            'Accenture': ['accenture'],
+            'Cognizant': ['cognizant', 'cognizant technology'],
+            'TechMahindra': ['tech mahindra', 'techmahindra'],
+            'IBM': ['ibm', 'ibm india'],
+            'Deloitte': ['deloitte'],
+            'Mphasis': ['mphasis'],
+            'LTIMindtree': ['ltimindtree', 'lti mindtree'],
+            'Hexaware': ['hexaware'],
+            'Persistent': ['persistent systems', 'persistent'],
         }
 
         # Enhanced headers for Reddit
@@ -258,18 +274,25 @@ class RedditScraper(BaseScraper):
         full_text = f"{title} {selftext}"
         interview_match = any(re.search(pattern, full_text) for pattern in interview_patterns)
 
-        # Additional quality checks
-        min_content_length = len(title) + len(selftext) > 150  # Increased minimum
+        # Content must be substantial enough to be a real experience writeup
+        min_content_length = len(selftext) >= 300
+
+        # Company must appear in the title, OR be mentioned 3+ times in the body.
+        # This stops posts where the company is only a passing mention in a long thread.
+        company_variations = self.company_mappings.get(company, [company.lower()])
+        company_in_title = any(v in title for v in company_variations)
+        body_mentions = sum(selftext.count(v) for v in company_variations)
+        company_prominence = company_in_title or body_mentions >= 3
 
         # Avoid common false positives
         false_positive_keywords = [
-            'hiring', 'job posting', 'salary negotiation', 'company culture',
+            'job posting', 'salary negotiation', 'company culture',
             'benefits', 'work life balance', 'resignation', 'performance review'
         ]
         is_false_positive = any(keyword in full_text for keyword in false_positive_keywords)
 
-        # Must have company match AND interview keywords AND good length AND not false positive
-        result = company_match and interview_match and min_content_length and not is_false_positive
+        # Must have company match AND interview keywords AND good length AND prominent company AND not false positive
+        result = company_match and interview_match and min_content_length and company_prominence and not is_false_positive
 
         if result:
             self.logger.debug(f"Valid interview post found: {title[:50]}... for {company}")
@@ -297,7 +320,12 @@ class RedditScraper(BaseScraper):
                 return None
 
             content = post_data.get('selftext', '').strip()
-            if not content or len(content) < 100:  # Skip very short content
+            if not content or len(content) < 500:  # Require substantial content
+                return None
+
+            # Must contain at least one interview-specific keyword
+            interview_keywords = ['interview', 'round', 'hiring', 'offer', 'rejected', 'onsite', 'technical']
+            if not any(kw in content.lower() for kw in interview_keywords):
                 return None
 
             # Extract metadata

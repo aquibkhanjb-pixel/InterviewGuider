@@ -43,8 +43,9 @@ export const interviewAPI = {
   },
   getCompanyInsights: (company) => api.get(`/api/insights/${company}`),
   getRecommendations: (company) => api.get(`/api/insights/${company}/recommendations`),
-  triggerAnalysis: (company, options = {}) => 
+  triggerAnalysis: (company, options = {}) =>
     api.post(`/api/analysis/${company}`, options),
+  getJobStatus: (jobId) => api.get(`/api/analysis/job/${jobId}`),
   getAnalysisStatus: () => api.get('/api/analysis/status'),
   compareCompanies: (companies) => 
     api.post('/api/compare/', { companies }),

@@ -62,28 +62,60 @@ const Dashboard = ({ onNotification }) => {
   };
 
   const triggerAnalysis = async (company) => {
-    setAnalysisLoading({ ...analysisLoading, [company]: true });
-    
+    setAnalysisLoading(prev => ({ ...prev, [company]: true }));
+    onNotification(`Scraping started for ${company}. This may take 1–2 minutes…`, 'info');
+
     try {
-      onNotification(`Starting analysis for ${company}...`, 'info');
-      
-      const response = await interviewAPI.triggerAnalysis(company, {
+      // Start the background job
+      const startRes = await interviewAPI.triggerAnalysis(company, {
         max_experiences: 20,
         force_refresh: false
       });
-      
-      if (response.data.status === 'success') {
-        onNotification(`Analysis completed for ${company}! Found ${response.data.data_collection?.total_experiences || 0} experiences.`, 'success');
-        // Wait a moment then reload insights
-        setTimeout(() => loadInsights(), 1000);
-      } else {
-        onNotification(`Analysis failed for ${company}: ${response.data.error || 'Unknown error'}`, 'error');
-      }
+
+      const jobId = startRes.data.job_id;
+      if (!jobId) throw new Error('No job ID returned from server');
+
+      // Poll every 6 seconds until done or failed
+      await new Promise((resolve, reject) => {
+        const interval = setInterval(async () => {
+          try {
+            const poll = await interviewAPI.getJobStatus(jobId);
+            const { status, result, error } = poll.data;
+
+            if (status === 'completed') {
+              clearInterval(interval);
+              const total = result?.data_collection?.total_experiences || 0;
+              const scraped = result?.data_collection?.newly_scraped || 0;
+              if (total === 0) {
+                onNotification(
+                  `No interview experiences found for ${company}. The company may not have public data on supported platforms yet.`,
+                  'warning'
+                );
+              } else {
+                onNotification(
+                  `Analysis done for ${company}! ${scraped} new experiences scraped (${total} total).`,
+                  'success'
+                );
+              }
+              setTimeout(() => loadInsights(), 800);
+              resolve();
+            } else if (status === 'failed') {
+              clearInterval(interval);
+              reject(new Error(error || 'Pipeline failed'));
+            }
+            // status === 'running' or 'queued' → keep polling
+          } catch (pollErr) {
+            clearInterval(interval);
+            reject(pollErr);
+          }
+        }, 6000);
+      });
+
     } catch (error) {
       console.error(`Analysis error for ${company}:`, error);
       onNotification(`Analysis failed for ${company}: ${error.message}`, 'error');
     } finally {
-      setAnalysisLoading({ ...analysisLoading, [company]: false });
+      setAnalysisLoading(prev => ({ ...prev, [company]: false }));
     }
   };
 

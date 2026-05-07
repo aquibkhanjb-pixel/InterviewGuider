@@ -67,6 +67,22 @@ class CompanyExtractor:
             'Unacademy': ['unacademy', 'unacademy.com'],
             'Vedantu': ['vedantu', 'vedantu.com'],
             'Byju': ['byju', 'byjus', 'byju\'s'],
+
+            # IT Services & Consulting
+            'TCS': ['tcs', 'tata consultancy services', 'tata-consultancy', 'tatacons'],
+            'Infosys': ['infosys', 'infy', 'infosys.com'],
+            'Wipro': ['wipro', 'wipro technologies', 'wipro.com'],
+            'Capgemini': ['capgemini', 'cap gemini', 'capgemini.com'],
+            'HCL': ['hcl', 'hcl technologies', 'hcltech', 'hcl tech'],
+            'Accenture': ['accenture', 'accenture.com'],
+            'Cognizant': ['cognizant', 'ctsh', 'cognizant technology'],
+            'TechMahindra': ['tech mahindra', 'techmahindra', 'techm', 'tech-mahindra'],
+            'IBM': ['ibm', 'ibm india', 'international business machines'],
+            'Deloitte': ['deloitte', 'deloitte consulting'],
+            'Mphasis': ['mphasis'],
+            'LTIMindtree': ['ltimindtree', 'lti mindtree', 'l&t infotech', 'lt infotech'],
+            'Hexaware': ['hexaware', 'hexaware technologies'],
+            'Persistent': ['persistent', 'persistent systems'],
         }
 
     def extract_company_from_content(self, title: str, content: str, target_company: Optional[str] = None) -> str:

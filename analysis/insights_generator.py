@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from collections import defaultdict
 import logging
 from analysis.topic_extractor import AdvancedTopicExtractor
+from analysis.ml_scorer import tfidf_rerank
 
 
 class CompanyInsightsGenerator:
@@ -15,7 +16,7 @@ class CompanyInsightsGenerator:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.topic_extractor = AdvancedTopicExtractor()
-        
+
         # Statistical thresholds
         self.min_sample_size = 3
         self.confidence_threshold = 0.7
@@ -145,37 +146,38 @@ class CompanyInsightsGenerator:
             return self._insufficient_data_response(company_name, len(experiences))
         
         self.logger.info(f"Generating insights for {company_name} from {len(experiences)} experiences")
-        
+
         # Extract topics from all experiences
         experience_analyses = []
         for exp in experiences:
             analysis = self.topic_extractor.extract_topics_from_experience(exp)
             analysis['experience_metadata'] = exp
             experience_analyses.append(analysis)
-        
+
         # Generate comprehensive insights
         insights = {
             'company': company_name,
             'analysis_date': datetime.utcnow().isoformat(),
             'sample_size': len(experiences),
             'data_quality': self._assess_data_quality(experience_analyses),
-            
+
             # Core insights
             'topic_insights': self._generate_topic_insights(experience_analyses),
             'difficulty_analysis': self._analyze_difficulty_trends(experience_analyses),
             'interview_process_insights': self._analyze_interview_process(experience_analyses),
             'temporal_trends': self._analyze_temporal_trends(experience_analyses),
-            
+
             # Actionable recommendations
             'study_recommendations': self._generate_study_recommendations(experience_analyses),
             'preparation_strategy': self._generate_preparation_strategy(experience_analyses),
             'success_factors': self._identify_success_factors(experience_analyses),
-            
+
             # Advanced analytics
             'statistical_confidence': self._calculate_statistical_confidence(experience_analyses),
-            'comparative_analysis': self._generate_comparative_insights(company_name, experience_analyses)
+            'comparative_analysis': self._generate_comparative_insights(company_name, experience_analyses),
+
         }
-        
+
         return insights
     
     def _generate_topic_insights(self, analyses: List[Dict]) -> Dict:
@@ -184,46 +186,55 @@ class CompanyInsightsGenerator:
         topic_frequencies = defaultdict(list)
         topic_importances = defaultdict(list)
         topic_confidence_scores = defaultdict(list)
-        
+        topic_semantic_scores = defaultdict(list)
+
         total_weight = 0
         for analysis in analyses:
             exp_weight = analysis['experience_metadata'].get('time_weight', 1.0)
             total_weight += exp_weight
-            
+
             for topic, data in analysis['topics'].items():
                 topic_frequencies[topic].append(data['frequency_percent'] * exp_weight)
                 topic_importances[topic].append(data['importance_score'] * exp_weight)
                 topic_confidence_scores[topic].append(data['confidence'])
-        
+                sem = data.get('semantic_confidence')
+                if sem is not None:
+                    topic_semantic_scores[topic].append(sem)
+
         # Calculate comprehensive statistics
         topic_insights = {}
         for topic in topic_frequencies.keys():
             frequencies = topic_frequencies[topic]
             importances = topic_importances[topic]
             confidences = topic_confidence_scores[topic]
-            
+
             # Statistical calculations
             weighted_frequency = sum(frequencies) / total_weight * 100
             avg_importance = np.mean(importances)
             avg_confidence = np.mean(confidences)
-            
+
             # Frequency statistics
-            freq_std = np.std([f / analyses[i]['experience_metadata'].get('time_weight', 1.0) 
-                             for i, f in enumerate(frequencies)])
-            
+            freq_std = np.std([f / analyses[i]['experience_metadata'].get('time_weight', 1.0)
+                               for i, f in enumerate(frequencies)])
+
+            # Averaged semantic confidence (None when model unavailable)
+            sem_list = topic_semantic_scores[topic]
+            avg_semantic = round(float(np.mean(sem_list)), 3) if sem_list else None
+
             # Determine priority level
             priority = self._determine_priority_level(weighted_frequency, avg_importance, avg_confidence)
-            
+
             # Generate actionable insight
             category = topic.split('.')[0]
             topic_name = topic.split('.')[1].replace('_', ' ').title()
-            
+
             topic_insights[topic] = {
                 'topic_name': topic_name,
                 'category': category,
                 'weighted_frequency': round(weighted_frequency, 1),
                 'average_importance': round(avg_importance, 2),
                 'confidence_score': round(avg_confidence, 2),
+                'semantic_confidence': avg_semantic,
                 'frequency_std_dev': round(freq_std, 2),
                 'priority_level': priority,
                 'mentions_count': len(frequencies),
@@ -234,27 +245,24 @@ class CompanyInsightsGenerator:
                 'difficulty_assessment': self._assess_topic_difficulty(topic, analyses)
             }
         
-        # Sort by weighted frequency
-        sorted_insights = dict(sorted(topic_insights.items(), 
-                                    key=lambda x: x[1]['weighted_frequency'], 
-                                    reverse=True))
-        
+        # Apply TF-IDF re-ranking: topics common to this company but not trivially
+        # present in every experience rise above universally-mentioned topics.
+        n_exp = len(analyses)
+        topic_insights = tfidf_rerank(topic_insights, n_exp)
+
         return {
-            'detailed_topics': sorted_insights,
-            'top_5_topics': list(sorted_insights.keys())[:5],
-            'high_priority_topics': [t for t, d in sorted_insights.items() 
-                                   if d['priority_level'] == 'HIGH'],
-            'topic_distribution': self._calculate_topic_distribution(sorted_insights)
+            'detailed_topics': topic_insights,
+            'top_5_topics': list(topic_insights.keys())[:5],
+            'high_priority_topics': [t for t, d in topic_insights.items()
+                                     if d['priority_level'] == 'HIGH'],
+            'topic_distribution': self._calculate_topic_distribution(topic_insights)
         }
     
     def _determine_priority_level(self, frequency: float, importance: float, confidence: float) -> str:
-        """Determine priority level based on multiple factors."""
-        # Weighted scoring system
-        priority_score = (frequency * 0.4 + importance * 0.4 + confidence * 20 * 0.2)
-        
-        if priority_score >= 15 and confidence >= 0.7:
+        """Determine priority level based on how often the topic appears across interviews."""
+        if frequency >= 40:
             return 'HIGH'
-        elif priority_score >= 8 and confidence >= 0.5:
+        elif frequency >= 20:
             return 'MEDIUM'
         else:
             return 'LOW'
@@ -774,3 +782,4 @@ class CompanyInsightsGenerator:
             'current_company': company_name,
             'sample_size': len(analyses)
         }
+

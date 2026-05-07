@@ -28,21 +28,29 @@ class AdvancedTopicExtractor:
     3. TF-IDF style importance scoring
     4. Difficulty level assessment
     5. Interview round classification
+    6. Semantic confidence scoring (sentence-transformers, optional)
     """
-    
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.stop_words = set(stopwords.words('english'))
-        
+
         # Initialize comprehensive keyword dictionary
         self.technical_keywords = self._build_keyword_dictionary()
-        
+
         # Flatten for quick lookup
         self.keyword_lookup = self._create_lookup_table()
-        
+
+        # Reverse map: "category.topic" → list of keywords (for semantic scorer)
+        self.topic_keywords_map = {
+            f"{cat}.{sub}": kws
+            for cat, subcats in self.technical_keywords.items()
+            for sub, kws in subcats.items()
+        }
+
         # Context patterns for better detection
         self.context_patterns = self._build_context_patterns()
-        
+
         # Difficulty indicators
         self.difficulty_patterns = self._build_difficulty_patterns()
     
@@ -300,13 +308,15 @@ class AdvancedTopicExtractor:
     
     def _calculate_topic_scores(self, topics: Dict[str, int], text: str, experience_date: datetime) -> Dict[str, Dict]:
         """Calculate comprehensive topic scores."""
+        from analysis.ml_scorer import SemanticConfidenceScorer
+
         scored_topics = {}
         text_words = len(text.split())
-        
+
         for topic, raw_count in topics.items():
             # Basic frequency
             frequency = (raw_count / text_words) * 100 if text_words > 0 else 0
-            
+
             # Category importance multipliers
             category = topic.split('.')[0]
             importance_multipliers = {
@@ -316,20 +326,26 @@ class AdvancedTopicExtractor:
                 'programming_concepts': 1.3,
                 'technologies': 1.1
             }
-            
+
             multiplier = importance_multipliers.get(category, 1.0)
-            
+
             # Calculate importance score with logarithmic scaling
             importance_score = frequency * multiplier * math.log(raw_count + 1)
-            
+
             # Time decay factor
             from utils.time_utils import ExponentialDecayCalculator
             decay_calc = ExponentialDecayCalculator()
             time_factor = decay_calc.calculate_weight(experience_date)
-            
+
             # Final weighted importance
             weighted_importance = importance_score * time_factor
-            
+
+            # Semantic confidence (falls back to keyword method if model unavailable)
+            topic_name = topic.split('.')[1]
+            topic_kws = self.topic_keywords_map.get(topic, [])
+            semantic_conf = SemanticConfidenceScorer.score(topic_name, topic_kws, text)
+            confidence = self._calculate_topic_confidence(raw_count, frequency, semantic_conf)
+
             scored_topics[topic] = {
                 'raw_count': raw_count,
                 'frequency_percent': round(frequency, 2),
@@ -337,21 +353,28 @@ class AdvancedTopicExtractor:
                 'weighted_importance': round(weighted_importance, 2),
                 'time_factor': round(time_factor, 3),
                 'category': category,
-                'topic_name': topic.split('.')[1],
-                'confidence': self._calculate_topic_confidence(raw_count, frequency)
+                'topic_name': topic_name,
+                'confidence': confidence,
+                'semantic_confidence': round(semantic_conf, 3) if semantic_conf is not None else None,
             }
-        
+
         # Sort by weighted importance
-        return dict(sorted(scored_topics.items(), 
-                          key=lambda x: x[1]['weighted_importance'], 
-                          reverse=True))
+        return dict(sorted(scored_topics.items(),
+                           key=lambda x: x[1]['weighted_importance'],
+                           reverse=True))
     
-    def _calculate_topic_confidence(self, raw_count: int, frequency: float) -> float:
-        """Calculate confidence score for topic detection."""
-        # Higher counts and frequencies increase confidence
-        count_factor = min(raw_count / 5.0, 1.0)  # Cap at 5 mentions
-        frequency_factor = min(frequency / 2.0, 1.0)  # Cap at 2% frequency
-        
+    def _calculate_topic_confidence(self, raw_count: int, frequency: float,
+                                    semantic_score: float = None) -> float:
+        """
+        Confidence score for topic detection.
+        Uses semantic cosine similarity when available (sentence-transformers),
+        otherwise falls back to the count + frequency heuristic.
+        """
+        if semantic_score is not None:
+            return round(semantic_score, 2)
+
+        count_factor = min(raw_count / 5.0, 1.0)
+        frequency_factor = min(frequency / 2.0, 1.0)
         return round((count_factor + frequency_factor) / 2, 2)
     
     def _assess_difficulty(self, text: str) -> Dict:

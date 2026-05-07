@@ -32,6 +32,9 @@ ENV/
 .virtualenv/
 conda-meta/
 .conda/
+intelligent_env/
+intelligent_env1/
+interview_system/
 
 # Environment Variables
 .env

@@ -1,124 +1,155 @@
 """
-Analysis routes with real data queries.
+Analysis routes - async background scraping + polling.
 """
+
+import threading
+import uuid
+import logging
+from datetime import datetime
 
 from flask import Blueprint, request, jsonify
 from database.connection import db_manager
-from database.models import Company, InterviewExperience, CompanyInsight, Topic
-import logging
-from datetime import datetime, timedelta
+from database.models import Company, InterviewExperience
 
-# Initialize blueprint
 analysis_bp = Blueprint('analysis', __name__)
 logger = logging.getLogger(__name__)
 
+# In-memory job store  {job_id: {status, company, result, error, started_at}}
+_jobs: dict = {}
+_jobs_lock = threading.Lock()
+
+
+def _set_job(job_id: str, **kwargs):
+    with _jobs_lock:
+        _jobs[job_id] = {**_jobs.get(job_id, {}), **kwargs}
+
+
+def _get_job(job_id: str):
+    with _jobs_lock:
+        return dict(_jobs.get(job_id, {}))
+
+
+def _ensure_company(company_name: str):
+    """Create company in DB if it doesn't exist yet."""
+    with db_manager.get_session() as session:
+        company = session.query(Company).filter(Company.name == company_name).first()
+        if not company:
+            company = Company(name=company_name, display_name=company_name)
+            session.add(company)
+            session.commit()
+            logger.info(f"Created new company: {company_name}")
+
+
+def _run_pipeline(job_id: str, company_name: str, max_experiences: int, force_refresh: bool):
+    """Worker function – runs in a background thread."""
+    _set_job(job_id, status='running', started_at=datetime.utcnow().isoformat())
+    try:
+        from scrapers.pipeline_manager import pipeline_manager
+        results = pipeline_manager.run_complete_analysis(
+            company_name,
+            max_experiences=max_experiences,
+            force_refresh=force_refresh
+        )
+
+        with db_manager.get_session() as session:
+            total = session.query(InterviewExperience).join(Company).filter(
+                Company.name == company_name
+            ).count()
+
+        dc = results.get('data_collection', {})
+        _set_job(job_id,
+            status='completed',
+            finished_at=datetime.utcnow().isoformat(),
+            result={
+                'status': results['status'],
+                'company': company_name,
+                'data_collection': {
+                    'total_experiences': total,
+                    'newly_scraped': dc.get('newly_scraped', 0),
+                    'scrapers_used': list(dc.get('platform_results', {}).keys()),
+                    'platforms_breakdown': dc.get('platform_results', {}),
+                    'time_taken': f"{results.get('performance_metrics', {}).get('total_time_seconds', 0):.1f}s"
+                },
+                'analysis_metadata': {
+                    'topics_identified': len(results.get('analysis_results', {}).get('unique_topics', [])),
+                    'insights_generated': len(
+                        results.get('insights', {})
+                              .get('topic_insights', {})
+                              .get('detailed_topics', {})
+                    ),
+                    'stages_completed': results.get('stages_completed', []),
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+            }
+        )
+        logger.info(f"Job {job_id} completed for {company_name}")
+
+    except Exception as e:
+        logger.error(f"Job {job_id} failed for {company_name}: {e}", exc_info=True)
+        _set_job(job_id, status='failed', error=str(e), finished_at=datetime.utcnow().isoformat())
+
+
 @analysis_bp.route('/<company_name>', methods=['POST'])
 def trigger_analysis(company_name):
-    """Enhanced analysis endpoint that queries real experience data."""
+    """Start a background scraping job and return a job_id immediately."""
     try:
         data = request.get_json() or {}
         max_experiences = data.get('max_experiences', 20)
         force_refresh = data.get('force_refresh', False)
 
-        logger.info(f"Analysis request for {company_name}: max_experiences={max_experiences}, force_refresh={force_refresh}")
+        _ensure_company(company_name)
 
-        with db_manager.get_session() as session:
-            # Find company
-            company = session.query(Company).filter(
-                Company.name == company_name
-            ).first()
+        job_id = str(uuid.uuid4())[:12]
+        _set_job(job_id, status='queued', company=company_name)
 
-            if not company:
-                return jsonify({
-                    'status': 'error',
-                    'error': 'Company not found',
-                    'company': company_name
-                }), 404
+        thread = threading.Thread(
+            target=_run_pipeline,
+            args=(job_id, company_name, max_experiences, force_refresh),
+            daemon=True
+        )
+        thread.start()
 
-            # Get actual experience count
-            total_experiences = session.query(InterviewExperience).filter(
-                InterviewExperience.company_id == company.id
-            ).count()
-
-            # Get recent experiences for analysis
-            recent_experiences = session.query(InterviewExperience).filter(
-                InterviewExperience.company_id == company.id
-            ).order_by(InterviewExperience.experience_date.desc()).limit(max_experiences).all()
-
-            # Calculate basic statistics from experiences
-            platform_stats = {}
-            role_stats = {}
-            success_rate = 0
-            avg_difficulty = 0
-
-            if recent_experiences:
-                for exp in recent_experiences:
-                    platform_stats[exp.source_platform] = platform_stats.get(exp.source_platform, 0) + 1
-                    if exp.role:
-                        role_stats[exp.role] = role_stats.get(exp.role, 0) + 1
-
-                successful_experiences = [exp for exp in recent_experiences if exp.success is True]
-                success_rate = len(successful_experiences) / len(recent_experiences) * 100
-
-                difficulty_scores = [exp.difficulty_score for exp in recent_experiences if exp.difficulty_score is not None]
-                avg_difficulty = sum(difficulty_scores) / len(difficulty_scores) if difficulty_scores else 0
-
-            # Generate basic insights based on experience data
-            insights_generated = 0
-            topics_identified = []
-
-            # Create or update basic insights
-            if recent_experiences:
-                # Check for existing insights
-                existing_insights = session.query(CompanyInsight).filter(
-                    CompanyInsight.company_id == company.id
-                ).count()
-
-                insights_generated = max(existing_insights, 3)  # Minimum 3 basic insights
-                topics_identified = ['Dynamic Programming', 'Data Structures', 'System Design']
-
+        logger.info(f"Started job {job_id} for '{company_name}'")
         return jsonify({
-            'status': 'success',
-            'message': f'Analysis completed for {company_name}',
+            'status': 'started',
+            'job_id': job_id,
             'company': company_name,
-            'data_collection': {
-                'total_experiences': total_experiences,
-                'analyzed_experiences': len(recent_experiences),
-                'scrapers_used': list(platform_stats.keys()) if platform_stats else ['geeksforgeeks'],
-                'time_taken': '2.5s',
-                'platforms_breakdown': platform_stats,
-                'roles_breakdown': role_stats
-            },
-            'analysis_metadata': {
-                'topics_identified': len(topics_identified),
-                'insights_generated': insights_generated,
-                'success_rate': round(success_rate, 1),
-                'avg_difficulty': round(avg_difficulty, 2),
-                'timestamp': datetime.utcnow().isoformat(),
-                'data_freshness': 'live'
-            },
-            'performance_metrics': {
-                'total_experiences_analyzed': len(recent_experiences),
-                'data_quality_score': 85.0 if recent_experiences else 0.0,
-                'confidence_score': 0.8 if len(recent_experiences) >= 5 else 0.5
-            }
-        })
+            'message': f'Scraping started for {company_name}. Poll /api/analysis/job/{job_id} for progress.'
+        }), 202
 
     except Exception as e:
-        logger.error(f"Error in analysis for {company_name}: {e}")
-        return jsonify({
-            'status': 'error',
-            'error': str(e),
-            'message': 'Analysis failed'
-        }), 500
+        logger.error(f"Failed to start analysis for '{company_name}': {e}", exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@analysis_bp.route('/job/<job_id>', methods=['GET'])
+def get_job_status(job_id):
+    """Poll this endpoint to check scraping job progress."""
+    job = _get_job(job_id)
+    if not job:
+        return jsonify({'status': 'error', 'error': 'Job not found'}), 404
+
+    response = {
+        'job_id': job_id,
+        'status': job.get('status'),
+        'company': job.get('company'),
+        'started_at': job.get('started_at'),
+    }
+    if job.get('status') == 'completed':
+        response['result'] = job.get('result', {})
+        response['finished_at'] = job.get('finished_at')
+    elif job.get('status') == 'failed':
+        response['error'] = job.get('error')
+        response['finished_at'] = job.get('finished_at')
+
+    return jsonify(response)
+
 
 @analysis_bp.route('/status', methods=['GET'])
 def get_analysis_status():
-    """Get current analysis status."""
     return jsonify({
-        'status': 'simplified',
-        'message': 'Analysis system is running in simplified mode',
-        'available_features': ['basic_endpoints'],
-        'unavailable_features': ['nltk_analysis', 'topic_extraction', 'insights_generation'],
-        'reason': 'NumPy/NLTK compatibility issues'
+        'status': 'active',
+        'message': 'Async pipeline active: scraping + NLP analysis + insights generation',
+        'available_features': ['scraping', 'topic_extraction', 'insights_generation'],
+        'scrapers': ['geeksforgeeks', 'leetcode', 'glassdoor', 'reddit']
     })

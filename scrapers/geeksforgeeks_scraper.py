@@ -52,7 +52,23 @@ class GeeksforGeeksScraper(BaseScraper):
             'UrbanClap': ['urbanclap', 'urban-clap', 'urbancompany'],
             'Cred': ['cred'],
             'Grofers': ['grofers'],
-            'Dunzo': ['dunzo']
+            'Dunzo': ['dunzo'],
+
+            # IT Services & Consulting
+            'TCS': ['tcs', 'tata-consultancy-services'],
+            'Infosys': ['infosys'],
+            'Wipro': ['wipro'],
+            'Capgemini': ['capgemini'],
+            'HCL': ['hcl', 'hcltech'],
+            'Accenture': ['accenture'],
+            'Cognizant': ['cognizant'],
+            'TechMahindra': ['tech-mahindra', 'techmahindra'],
+            'IBM': ['ibm'],
+            'Deloitte': ['deloitte'],
+            'Mphasis': ['mphasis'],
+            'LTIMindtree': ['ltimindtree', 'lti-mindtree'],
+            'Hexaware': ['hexaware'],
+            'Persistent': ['persistent-systems', 'persistent'],
         }
     
     def discover_experience_urls(self, company: str, max_pages: int = 10) -> List[str]:

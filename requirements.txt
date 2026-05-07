@@ -10,7 +10,11 @@ python-dateutil==2.8.2
 # NLP - Using compatible versions
 nltk==3.8.1
 
-# Math libraries (since you're skipping scikit-learn)
+# ML scoring
+sentence-transformers>=2.2.0
+scikit-learn>=1.3.0
+
+# Math libraries
 numpy>=2.1.1
 
 

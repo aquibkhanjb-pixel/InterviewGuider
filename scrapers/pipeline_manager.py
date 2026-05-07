@@ -14,6 +14,8 @@ from sqlalchemy import desc
 from scrapers.leetcode_scraper import LeetCodeScraper
 from scrapers.glassdoor_scraper import GlassdoorScraper
 from scrapers.redit_scrapper import RedditScraper
+from scrapers.interviewbit_scraper import InterviewBitScraper
+from scrapers.ambitionbox_scraper import AmbitionBoxScraper
 
 from database.connection import db_manager
 from database.models import Company, InterviewExperience, Topic, TopicMention, CompanyInsight
@@ -36,9 +38,11 @@ class PipelineManager:
         # Initialize multiple scrapers
         self.scrapers = {
             'geeksforgeeks': GeeksforGeeksScraper(),
-            'leetcode': LeetCodeScraper(),
-            'glassdoor': GlassdoorScraper(),
-            'reddit': RedditScraper()
+            'interviewbit':  InterviewBitScraper(),
+            'ambitionbox':   AmbitionBoxScraper(),
+            'leetcode':      LeetCodeScraper(),
+            'reddit':        RedditScraper(),
+            'glassdoor':     GlassdoorScraper(),
         }
         
         self.topic_extractor = AdvancedTopicExtractor()
@@ -54,9 +58,11 @@ class PipelineManager:
             'errors_encountered': 0,
             'scraper_performance': {
                 'geeksforgeeks': {'attempted': 0, 'successful': 0},
-                'leetcode': {'attempted': 0, 'successful': 0},
-                'glassdoor': {'attempted': 0, 'successful': 0},
-                'reddit': {'attempted': 0, 'successful': 0}
+                'interviewbit':  {'attempted': 0, 'successful': 0},
+                'ambitionbox':   {'attempted': 0, 'successful': 0},
+                'leetcode':      {'attempted': 0, 'successful': 0},
+                'reddit':        {'attempted': 0, 'successful': 0},
+                'glassdoor':     {'attempted': 0, 'successful': 0},
             }
         }
     
@@ -603,6 +609,7 @@ class PipelineManager:
                         'experience_date': exp.experience_date,
                         'time_weight': exp.time_weight,
                         'source_platform': exp.source_platform,
+                        'outcome': 'offer' if exp.success is True else ('rejected' if exp.success is False else 'unknown'),
                         'topics': topics_data
                     })
                 

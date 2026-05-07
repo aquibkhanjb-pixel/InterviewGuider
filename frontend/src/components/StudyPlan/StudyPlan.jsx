@@ -33,8 +33,44 @@ import {
   Assignment,
   Download,
   Schedule,
-  Analytics
+  Analytics,
+  Fingerprint,
+  Psychology,
 } from '@mui/icons-material';
+
+/** Small badge showing how company-specific a topic is based on TF-IDF discriminative_score */
+const SpecificityBadge = ({ score }) => {
+  if (score == null) return null;
+  const pct = Math.round(score * 100);
+  const [label, color] =
+    score >= 0.7 ? ['Highly specific', 'secondary'] :
+    score >= 0.4 ? ['Company-relevant', 'info'] :
+                   ['Generic topic', 'default'];
+  return (
+    <Chip
+      icon={<Fingerprint sx={{ fontSize: 14 }} />}
+      label={`${label} ${pct}%`}
+      size="small"
+      color={color}
+      variant="outlined"
+      sx={{ fontSize: '0.68rem', height: 22 }}
+    />
+  );
+};
+
+/** Tiny indicator when sentence-transformer semantic confidence is available */
+const SemanticBadge = ({ score }) => {
+  if (score == null) return null;
+  return (
+    <Chip
+      icon={<Psychology sx={{ fontSize: 14 }} />}
+      label={`AI conf ${score}`}
+      size="small"
+      variant="outlined"
+      sx={{ fontSize: '0.68rem', height: 22, color: 'text.secondary' }}
+    />
+  );
+};
 
 const StudyPlan = ({ insights, company }) => {
   const [completedTopics, setCompletedTopics] = useState(new Set());
@@ -229,21 +265,24 @@ Schedule has been saved locally!`);
                 
                 <ListItemText
                   primary={
-                    <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap">
+                    <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={0.5}>
                       <Typography variant="subtitle1" fontWeight="medium">
                         {topicData.topic_name}
                       </Typography>
-                      <Box display="flex" gap={1} flexWrap="wrap">
-                        <Chip 
+                      <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
+                        <Chip
                           label={`${topicData.weighted_frequency}%`}
                           size="small"
                           color={color}
+                          title="Mention frequency across interviews"
                         />
-                        <Chip 
+                        <Chip
                           label={topicData.category}
                           size="small"
                           variant="outlined"
                         />
+                        <SpecificityBadge score={topicData.discriminative_score} />
+                        <SemanticBadge score={topicData.semantic_confidence} />
                       </Box>
                     </Box>
                   }
@@ -251,6 +290,7 @@ Schedule has been saved locally!`);
                     <Box mt={1}>
                       <Typography variant="body2" color="textSecondary" gutterBottom>
                         Confidence: {topicData.confidence_score} | Priority: {topicData.priority_level}
+                        {topicData.mentions_count != null && ` | In ${topicData.mentions_count} interview(s)`}
                       </Typography>
 
                       {/* Practice Problems */}
@@ -261,39 +301,21 @@ Schedule has been saved locally!`);
                         {topicData.topic_name.toLowerCase().includes('array') && (
                           <Box display="flex" flexWrap="wrap" gap={0.5}>
                             {['Two Sum', 'Best Time to Buy Stock', 'Maximum Subarray'].map((problem, idx) => (
-                              <Chip
-                                key={idx}
-                                label={problem}
-                                size="small"
-                                variant="outlined"
-                                sx={{ fontSize: '0.7rem' }}
-                              />
+                              <Chip key={idx} label={problem} size="small" variant="outlined" sx={{ fontSize: '0.7rem' }} />
                             ))}
                           </Box>
                         )}
                         {topicData.topic_name.toLowerCase().includes('dynamic') && (
                           <Box display="flex" flexWrap="wrap" gap={0.5}>
                             {['Climbing Stairs', 'House Robber', 'Coin Change'].map((problem, idx) => (
-                              <Chip
-                                key={idx}
-                                label={problem}
-                                size="small"
-                                variant="outlined"
-                                sx={{ fontSize: '0.7rem' }}
-                              />
+                              <Chip key={idx} label={problem} size="small" variant="outlined" sx={{ fontSize: '0.7rem' }} />
                             ))}
                           </Box>
                         )}
                         {topicData.topic_name.toLowerCase().includes('tree') && (
                           <Box display="flex" flexWrap="wrap" gap={0.5}>
                             {['Binary Tree Traversal', 'Maximum Depth', 'Validate BST'].map((problem, idx) => (
-                              <Chip
-                                key={idx}
-                                label={problem}
-                                size="small"
-                                variant="outlined"
-                                sx={{ fontSize: '0.7rem' }}
-                              />
+                              <Chip key={idx} label={problem} size="small" variant="outlined" sx={{ fontSize: '0.7rem' }} />
                             ))}
                           </Box>
                         )}
