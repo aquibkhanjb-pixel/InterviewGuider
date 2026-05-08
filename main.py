@@ -25,12 +25,8 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(app_config)
     
-    # Enable CORS — allow Vercel frontend (any subdomain) and local dev
-    CORS(app, origins=[
-        r"https://.*\.vercel\.app",
-        "http://localhost:5173",
-        "http://localhost:3000",
-    ])
+    # Enable CORS for all origins (portfolio project — restrict after confirming Vercel URL)
+    CORS(app)
     
     # Initialize database
     db.init_app(app)

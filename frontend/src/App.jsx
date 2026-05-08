@@ -99,17 +99,24 @@ function App() {
     checkAPIHealth();
   }, []);
 
-  const checkAPIHealth = async () => {
-    try {
-      const response = await interviewAPI.healthCheck();
-      setApiHealthy(response.data.status === 'healthy');
-      if (response.data.status !== 'healthy') {
-        showNotification('Backend API is not fully healthy', 'warning');
+  const checkAPIHealth = async (retries = 4, delayMs = 8000) => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const response = await interviewAPI.healthCheck();
+        if (response.data.status === 'healthy') {
+          setApiHealthy(true);
+          return;
+        }
+      } catch (_) {
+        // swallow — will retry
       }
-    } catch (error) {
-      setApiHealthy(false);
-      showNotification('Unable to connect to backend API', 'error');
+      if (attempt < retries) {
+        await new Promise(res => setTimeout(res, delayMs));
+      }
     }
+    // all retries exhausted
+    setApiHealthy(false);
+    showNotification('Unable to connect to backend API. It may be waking up — please refresh in 30 seconds.', 'warning');
   };
 
   const showNotification = (message, severity = 'info') => {
