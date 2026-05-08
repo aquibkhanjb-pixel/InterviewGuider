@@ -326,12 +326,24 @@ class AdvancedTopicExtractor:
         
         return dict(merged)
     
+    # Max topics that get the expensive semantic-confidence encode call.
+    # Keeps Render free-tier inference time under ~10 s per experience.
+    _MAX_SEMANTIC_TOPICS = 5
+
     def _calculate_topic_scores(self, topics: Dict[str, int], text: str, experience_date: datetime) -> Dict[str, Dict]:
         """Calculate comprehensive topic scores."""
         from analysis.ml_scorer import SemanticConfidenceScorer
 
         scored_topics = {}
         text_words = len(text.split())
+
+        # Only run the expensive semantic encode for the top-N most frequent topics.
+        top_topics_for_semantic = set(
+            t for t, _ in sorted(topics.items(), key=lambda x: x[1], reverse=True)[:self._MAX_SEMANTIC_TOPICS]
+        )
+
+        from utils.time_utils import ExponentialDecayCalculator
+        decay_calc = ExponentialDecayCalculator()
 
         for topic, raw_count in topics.items():
             # Basic frequency
@@ -353,17 +365,19 @@ class AdvancedTopicExtractor:
             importance_score = frequency * multiplier * math.log(raw_count + 1)
 
             # Time decay factor
-            from utils.time_utils import ExponentialDecayCalculator
-            decay_calc = ExponentialDecayCalculator()
             time_factor = decay_calc.calculate_weight(experience_date)
 
             # Final weighted importance
             weighted_importance = importance_score * time_factor
 
-            # Semantic confidence (falls back to keyword method if model unavailable)
+            # Semantic confidence only for top topics (saves ~95% of encode calls)
             topic_name = topic.split('.')[1]
-            topic_kws = self.topic_keywords_map.get(topic, [])
-            semantic_conf = SemanticConfidenceScorer.score(topic_name, topic_kws, text)
+            if topic in top_topics_for_semantic:
+                topic_kws = self.topic_keywords_map.get(topic, [])
+                semantic_conf = SemanticConfidenceScorer.score(topic_name, topic_kws, text)
+            else:
+                semantic_conf = None
+
             confidence = self._calculate_topic_confidence(raw_count, frequency, semantic_conf)
 
             scored_topics[topic] = {
