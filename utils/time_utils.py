@@ -16,16 +16,20 @@ class ExponentialDecayCalculator:
     def calculate_weight(self, experience_date: datetime) -> float:
         """
         Calculate exponential decay weight: w = e^(-λt)
-        
+
         Args:
             experience_date: When the experience was published
-            
+
         Returns:
             Weight between 0.01 and 1.0
         """
         if isinstance(experience_date, str):
             experience_date = datetime.fromisoformat(experience_date.replace('Z', '+00:00'))
-        
+
+        # Strip tzinfo to avoid naive/aware comparison errors (psycopg3 returns tz-aware)
+        if hasattr(experience_date, 'tzinfo') and experience_date.tzinfo is not None:
+            experience_date = experience_date.replace(tzinfo=None)
+
         now = datetime.utcnow()
         age_months = (now - experience_date).days / 30.44  # Average days per month
         

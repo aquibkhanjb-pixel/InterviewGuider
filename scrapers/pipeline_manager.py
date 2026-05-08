@@ -429,7 +429,10 @@ class PipelineManager:
                 ).order_by(InterviewExperience.scraped_at.desc()).first()
                 
                 if latest_experience:
-                    days_since_update = (datetime.utcnow() - latest_experience.scraped_at).days
+                    scraped = latest_experience.scraped_at
+                    if scraped and scraped.tzinfo is not None:
+                        scraped = scraped.replace(tzinfo=None)
+                    days_since_update = (datetime.utcnow() - scraped).days if scraped else 999
                     return days_since_update > days_threshold
                 
                 return True  # No data means stale
@@ -521,7 +524,10 @@ class PipelineManager:
                 ).first()
                 
                 if experience and experience.processed_at:
-                    hours_since = (datetime.utcnow() - experience.processed_at).total_seconds() / 3600
+                    proc = experience.processed_at
+                    if proc.tzinfo is not None:
+                        proc = proc.replace(tzinfo=None)
+                    hours_since = (datetime.utcnow() - proc).total_seconds() / 3600
                     return hours_since < hours_threshold
                 
                 return False
