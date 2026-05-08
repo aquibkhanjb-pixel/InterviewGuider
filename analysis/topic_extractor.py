@@ -38,14 +38,22 @@ class AdvancedTopicExtractor:
     6. Semantic confidence scoring (sentence-transformers, optional)
     """
 
+    _FALLBACK_STOPWORDS = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'is', 'was', 'are', 'were', 'be', 'been',
+        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'this', 'that', 'these', 'those', 'it',
+        'as', 'at', 'its', 'about', 'into', 'through', 'during', 'before',
+        'after', 'above', 'below', 'between', 'out', 'off', 'over', 'then',
+        'there', 'when', 'where', 'which', 'who', 'whom', 'what', 'if', 'not',
+    }
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.stop_words = set(_nltk_stopwords.words('english')) if _NLTK_AVAILABLE and _nltk_stopwords else {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'from', 'is', 'was', 'are', 'were', 'be', 'been',
-            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-            'should', 'may', 'might', 'this', 'that', 'these', 'those', 'it',
-        }
+        try:
+            self.stop_words = set(_nltk_stopwords.words('english')) if (_NLTK_AVAILABLE and _nltk_stopwords) else self._FALLBACK_STOPWORDS
+        except Exception:
+            self.stop_words = self._FALLBACK_STOPWORDS
 
         # Initialize comprehensive keyword dictionary
         self.technical_keywords = self._build_keyword_dictionary()

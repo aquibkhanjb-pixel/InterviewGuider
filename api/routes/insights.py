@@ -150,12 +150,15 @@ def get_company_insights(company_name):
         })
 
     except Exception as e:
+        import traceback
         logger.error(f"Error getting insights for {company_name}: {e}", exc_info=True)
         return jsonify({
-            'error':   str(e),
-            'company': company_name,
-            'message': 'Insights temporarily unavailable',
-        }), 500
+            'error':     str(e),
+            'error_type': type(e).__name__,
+            'traceback': traceback.format_exc(),
+            'company':   company_name,
+            'message':   'Insights temporarily unavailable',
+        })  # 200 so WebFetch can read the body
 
 
 @insights_bp.route('/<company_name>/recommendations', methods=['GET'])
