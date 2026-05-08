@@ -133,7 +133,12 @@ const Dashboard = ({ onNotification }) => {
         const interval = setInterval(async () => {
           if (Date.now() - startedAt > maxWaitMs) {
             clearInterval(interval);
-            reject(new Error('Analysis timed out after 5 minutes'));
+            onNotification(
+              `${company} is taking longer than usual — the scraper continues in the background. Click "Update Data" in a minute to check.`,
+              'info'
+            );
+            setTimeout(() => loadInsights([company]), 1000);
+            resolve();
             return;
           }
           try {

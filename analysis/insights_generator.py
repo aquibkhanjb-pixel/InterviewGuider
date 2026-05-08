@@ -202,14 +202,15 @@ class CompanyInsightsGenerator:
                     topic_semantic_scores[topic].append(sem)
 
         # Calculate comprehensive statistics
+        n_exp = len(analyses)
         topic_insights = {}
         for topic in topic_frequencies.keys():
             frequencies = topic_frequencies[topic]
             importances = topic_importances[topic]
             confidences = topic_confidence_scores[topic]
 
-            # Statistical calculations
-            weighted_frequency = sum(frequencies) / total_weight * 100
+            # % of experiences that mention this topic — naturally bounded 0-100
+            weighted_frequency = round(len(frequencies) / n_exp * 100, 1) if n_exp > 0 else 0.0
             avg_importance = np.mean(importances)
             avg_confidence = np.mean(confidences)
 
@@ -246,7 +247,6 @@ class CompanyInsightsGenerator:
         
         # Apply TF-IDF re-ranking: topics common to this company but not trivially
         # present in every experience rise above universally-mentioned topics.
-        n_exp = len(analyses)
         topic_insights = tfidf_rerank(topic_insights, n_exp)
 
         return {
