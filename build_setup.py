@@ -11,9 +11,5 @@ for pkg in ['punkt', 'punkt_tab', 'stopwords']:
     except Exception as e:
         print(f"NLTK '{pkg}' skipped: {e}")
 
-try:
-    from sentence_transformers import SentenceTransformer
-    SentenceTransformer('all-MiniLM-L6-v2')
-    print("sentence-transformers model cached OK")
-except Exception as e:
-    print(f"sentence-transformers model skipped (will load at runtime): {e}")
+# sentence-transformers removed from requirements — exceeds Render free tier 512MB RAM.
+# SemanticConfidenceScorer handles ImportError gracefully (returns None for all topics).
