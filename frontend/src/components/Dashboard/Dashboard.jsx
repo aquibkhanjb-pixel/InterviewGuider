@@ -90,8 +90,10 @@ const Dashboard = ({ onNotification }) => {
         // Resolve to the canonical DB name (handles TCS vs tcs vs Tcs)
         const canonicalName = companyMap.get(lc) || company;
 
-        // If we know the company has no data, skip the ML call immediately
-        if (hasDataSet.size > 0 && !hasDataSet.has(lc) && companyMap.has(lc)) {
+        // Skip the ML call for companies with no experiences OR not in DB at all.
+        // companyMap.has(lc): company is known to the DB
+        // hasDataSet.has(lc): company has at least one scraped experience
+        if (companyMap.size > 0 && (!companyMap.has(lc) || !hasDataSet.has(lc))) {
           fetched[company] = { status: 'no_data', company };
           continue;
         }
@@ -122,8 +124,6 @@ const Dashboard = ({ onNotification }) => {
       });
 
       const jobId = startRes.data.job_id;
-      // Backend may return the canonical name (e.g. 'TCS' for user input 'tcs')
-      const canonicalCompany = startRes.data.company || company;
       if (!jobId) throw new Error('No job ID returned from server');
 
       // Poll every 6 seconds until done or failed
@@ -155,8 +155,9 @@ const Dashboard = ({ onNotification }) => {
                   'success'
                 );
               }
-              // Use canonical company name for the reload (avoids case-mismatch after normalization)
-              setTimeout(() => loadInsights([canonicalCompany]), 800);
+              // Use the same key as in selectedCompanies so insights[company] is found on render.
+              // loadInsights() resolves the canonical DB name internally via companyMap.
+              setTimeout(() => loadInsights([company]), 800);
               resolve();
             } else if (status === 'failed') {
               clearInterval(interval);

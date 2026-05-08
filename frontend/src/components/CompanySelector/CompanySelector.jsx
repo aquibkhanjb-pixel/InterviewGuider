@@ -32,6 +32,7 @@ const CompanySelector = ({ selectedCompanies, onSelectionChange, maxSelection = 
   const [error, setError] = useState(null);
   const [customInput, setCustomInput] = useState('');
   const [inputError, setInputError] = useState('');
+  const [selectOpen, setSelectOpen] = useState(false);
 
   useEffect(() => {
     fetchCompanies();
@@ -54,12 +55,13 @@ const CompanySelector = ({ selectedCompanies, onSelectionChange, maxSelection = 
   };
 
   const handleCompanyToggle = (companyName) => {
-    const isSelected = selectedCompanies.includes(companyName);
+    const isSelected = selectedCompanies.some(c => c.toLowerCase() === companyName.toLowerCase());
     if (isSelected) {
-      onSelectionChange(selectedCompanies.filter(n => n !== companyName));
+      onSelectionChange(selectedCompanies.filter(c => c.toLowerCase() !== companyName.toLowerCase()));
     } else if (selectedCompanies.length < maxSelection) {
       onSelectionChange([...selectedCompanies, companyName]);
     }
+    setSelectOpen(false); // Close the dropdown after each pick
   };
 
   const handleRemoveCompany = (companyName) => {
@@ -117,16 +119,20 @@ const CompanySelector = ({ selectedCompanies, onSelectionChange, maxSelection = 
         <InputLabel>Select from known companies</InputLabel>
         <Select
           multiple
+          open={selectOpen}
+          onOpen={() => setSelectOpen(true)}
+          onClose={() => setSelectOpen(false)}
           value={selectedCompanies}
           label="Select from known companies"
-          renderValue={() => ''}
+          renderValue={() => selectedCompanies.length > 0 ? `${selectedCompanies.length} selected` : ''}
         >
           {companies.map((company) => (
             <MenuItem
               key={company.name}
               value={company.name}
               onClick={() => handleCompanyToggle(company.name)}
-              disabled={selectedCompanies.length >= maxSelection && !selectedCompanies.includes(company.name)}
+              selected={selectedCompanies.some(c => c.toLowerCase() === company.name.toLowerCase())}
+              disabled={selectedCompanies.length >= maxSelection && !selectedCompanies.some(c => c.toLowerCase() === company.name.toLowerCase())}
             >
               <Box display="flex" justifyContent="space-between" width="100%">
                 <span>{company.display_name || company.name}</span>

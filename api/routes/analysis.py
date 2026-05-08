@@ -133,7 +133,11 @@ def _run_pipeline(job_id: str, company_name: str, max_experiences: int, force_re
 
     except Exception as e:
         logger.error(f"Job {job_id} failed for {company_name}: {e}", exc_info=True)
-        _set_job(job_id, status='failed', error=str(e), finished_at=datetime.utcnow().isoformat())
+        # Wrap the failure write so a DB error here can't leave the job stuck in 'running'
+        try:
+            _set_job(job_id, status='failed', error=str(e), finished_at=datetime.utcnow().isoformat())
+        except Exception as inner:
+            logger.error(f"Could not mark job {job_id} as failed: {inner}")
 
 
 @analysis_bp.route('/<company_name>', methods=['POST'])
