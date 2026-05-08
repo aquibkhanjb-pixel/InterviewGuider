@@ -6,19 +6,26 @@ from typing import Dict, List, Set, Tuple
 from datetime import datetime
 import logging
 
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
+# Download required NLTK data — must succeed before the imports below
+_NLTK_PACKAGES = ['punkt', 'punkt_tab', 'stopwords']
+for _pkg in _NLTK_PACKAGES:
+    try:
+        nltk.data.find(f'tokenizers/{_pkg}' if 'punkt' in _pkg else f'corpora/{_pkg}')
+    except LookupError:
+        try:
+            nltk.download(_pkg, quiet=True)
+        except Exception:
+            pass  # will fail at runtime if truly unavailable
 
 try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords')
-
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize, sent_tokenize
+    from nltk.corpus import stopwords as _nltk_stopwords
+    from nltk.tokenize import word_tokenize, sent_tokenize
+    _NLTK_AVAILABLE = True
+except Exception:
+    _NLTK_AVAILABLE = False
+    _nltk_stopwords = None
+    def word_tokenize(text): return text.split()
+    def sent_tokenize(text): return [text]
 
 class AdvancedTopicExtractor:
     """
@@ -33,7 +40,12 @@ class AdvancedTopicExtractor:
 
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.stop_words = set(stopwords.words('english'))
+        self.stop_words = set(_nltk_stopwords.words('english')) if _NLTK_AVAILABLE and _nltk_stopwords else {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+            'of', 'with', 'by', 'from', 'is', 'was', 'are', 'were', 'be', 'been',
+            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+            'should', 'may', 'might', 'this', 'that', 'these', 'those', 'it',
+        }
 
         # Initialize comprehensive keyword dictionary
         self.technical_keywords = self._build_keyword_dictionary()
