@@ -6,6 +6,8 @@ import Dashboard from './components/Dashboard/Dashboard.jsx';
 import CompanyComparison from './components/CompanyComparison/CompanyComparison.jsx';
 import { interviewAPI } from './services/api.js';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 const theme = createTheme({
   palette: {
     primary: {
@@ -125,7 +127,7 @@ function App() {
         <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default' }}>
           {apiHealthy === false && (
             <Alert severity="error" sx={{ mb: 2 }}>
-              Backend API is not accessible. Please ensure your Flask server is running on http://localhost:5000
+              Backend API is not accessible. Ensure the server is running at {API_URL}
             </Alert>
           )}
           
