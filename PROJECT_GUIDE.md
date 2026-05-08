@@ -48,7 +48,7 @@ A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 │  6 Scrapers run   │       │  1. topic_extractor per exp       │
 │  concurrently:    │       │  2. consistency_rerank (df/N)     │
 │  - GeeksForGeeks  │       │  3. SemanticConfidenceScorer      │
-│  - InterviewBit   │       │     (all-MiniLM-L6-v2)           │
+│  - InterviewBit   │       │     (fastembed ONNX, ~50MB RAM)  │
 │  - AmbitionBox    │       │  4. Aggregate → priority + recs   │
 │  - LeetCode       │       │                                   │
 │  - Reddit         │       └──────────────────────────────────┘
@@ -69,7 +69,7 @@ A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 | API | Flask 3.0 + Flask-CORS | REST endpoints, job queue |
 | Scraping | requests + BeautifulSoup | Raw experience collection |
 | NLP | NLTK + keyword dictionary | Topic extraction from text |
-| ML Scoring | sentence-transformers + math | Semantic confidence + consistency scoring |
+| ML Scoring | fastembed (ONNX) + scikit-learn | Semantic confidence + consistency scoring |
 | Database | PostgreSQL + SQLAlchemy 2.0 | Persistent storage |
 | Deployment | Render (backend) + Vercel (frontend) | Cloud hosting |
 
@@ -81,11 +81,11 @@ A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 4. Pipeline Manager fires all 6 scrapers. Each scraper discovers URL links for the company, then fetches and parses each experience page
 5. Raw experiences are stored in `interview_experiences` table with deduplication on `source_url`
 6. `AdvancedTopicExtractor` runs on each experience: matches keywords from a hierarchical dictionary (data structures → array, linked list… | algorithms → DP, sorting…), applies time-weighting (recent = higher weight), computes per-topic confidence
-7. `SemanticConfidenceScorer` embeds each topic phrase and surrounding context windows using `all-MiniLM-L6-v2`, computes cosine similarity as a confirmation signal
+7. `SemanticConfidenceScorer` embeds each topic phrase and surrounding context windows using `fastembed` (ONNX Runtime), computes cosine similarity as a confirmation signal — only for top 5 topics per experience to keep latency low
 8. Frontend polls `GET /api/jobs/<job_id>` every 6 seconds until status = `completed`
 9. User visits insights → Frontend calls `GET /api/insights/<company>`
 10. `CompanyInsightsGenerator` reads all stored experiences, runs `consistency_rerank()` to compute how reliably each topic appears (df / n_experiences), sorts topics by a blended rank (60% frequency + 40% consistency), returns the full payload
-11. Dashboard renders the topic chart, study plan with specificity badges, and raw experiences list
+11. Dashboard renders the topic chart, study plan with consistency badges, and raw experiences list
 
 ---
 
@@ -113,7 +113,7 @@ A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 >
 > The interesting part is the NLP layer. I built a keyword dictionary organised by category — data structures, algorithms, system design, programming concepts. For every experience, the Topic Extractor scans the text and counts how many times each topic's keywords appear, applies a time-weight so recent experiences matter more, and produces a confidence score.
 >
-> On top of that, I added a semantic layer using sentence-transformers. The model is `all-MiniLM-L6-v2` — it's small and fast. For each topic keyword match in the text, I extract a 300-character window around it and compute cosine similarity between that context window and a topic description like 'interview question about dynamic programming'. This tells me whether the keyword is being used meaningfully, not just mentioned in passing.
+> On top of that, I added a semantic layer using fastembed. It's a library that runs embedding models via ONNX Runtime instead of PyTorch — I specifically chose it because PyTorch adds 200MB of RAM overhead and my deployment is on Render's free tier which has a 512MB limit. fastembed gives me the same quality embeddings at about 50MB total. For each topic keyword match in the text, I extract a 300-character window around it and compute cosine similarity between that context window and a topic description like 'interview question about dynamic programming'. This tells me whether the keyword is being used meaningfully, not just mentioned in passing.
 >
 > Then I apply consistency re-ranking. For each topic I compute df divided by N — the fraction of experiences where that topic appears. A topic appearing in every Amazon experience gets consistency 1.0, which is the strongest possible signal to study it. I blend frequency rank and consistency rank 60/40, so both signals reinforce each other. I deliberately avoided IDF here because IDF penalises topics that appear in all experiences — which is exactly backwards for a within-company analysis. IDF makes sense cross-company, to separate what's uniquely Amazon from what every company asks, but not within one company's corpus."
 
@@ -127,7 +127,7 @@ A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 
 **End with results or learnings (30 seconds)**
 
-> "The biggest technical challenge was making the NLP robust on noisy scraped text — interview posts are very informal. I had to build out a large stopword list and context-window extraction to avoid false positives. Another challenge was the scoring design — I initially implemented IDF re-ranking, which actively penalised topics that appear in all experiences. But within a single company's corpus, high document frequency IS the signal — if Arrays appear in 9 out of 9 Amazon experiences, that's the strongest possible reason to study them. I switched to a consistency score (df / N) that reinforces high-frequency topics instead of demoting them."
+> "The biggest technical challenge was making the NLP robust on noisy scraped text — interview posts are very informal. I had to build out a large stopword list and context-window extraction to avoid false positives. Another challenge was the scoring design — I initially used IDF re-ranking which actively penalised topics that appear in all experiences. But within a single company's corpus, high document frequency IS the signal — if Arrays appear in 9 out of 9 Amazon experiences, that's the strongest possible reason to study them. I switched to a consistency score that reinforces high-frequency topics instead of demoting them."
 
 ---
 
@@ -156,7 +156,9 @@ IDF remains the right tool at the cross-company level — when you want to disti
 ### Q3. What is semantic confidence scoring and why did you add it?
 
 **Answer:**
-Keyword matching has a core weakness: it counts every mention of a keyword equally. If someone says "we did NOT do dynamic programming" or just mentions "DP" in passing, the keyword counter increments. Semantic confidence addresses this by using a sentence-transformer model (`all-MiniLM-L6-v2`) to embed a 300-character window of text around each keyword match and compare it via cosine similarity to a description of the topic. If the context window is semantically close to "interview question about dynamic programming", the score is high. If it's a casual mention, the score is low. This acts as a quality filter on top of keyword frequency.
+Keyword matching has a core weakness: it counts every mention of a keyword equally. If someone says "we did NOT do dynamic programming" or just mentions "DP" in passing, the keyword counter increments. Semantic confidence addresses this by using `fastembed` to embed a 300-character window of text around each keyword match and compare it via cosine similarity to a description of the topic. If the context window is semantically close to "interview question about dynamic programming", the score is high. If it's a casual mention, the score is low. This acts as a quality filter on top of keyword frequency.
+
+I specifically chose `fastembed` over `sentence-transformers` because fastembed runs models via ONNX Runtime rather than PyTorch. PyTorch adds ~200MB of RAM overhead at import time — on Render's free tier with a 512MB limit that caused OOM crashes. fastembed delivers the same quality at ~50MB total, which is a deliberate engineering trade-off I made for the deployment constraint.
 
 ---
 
@@ -200,7 +202,7 @@ Adding a new company requires no code changes — companies are dynamic, stored 
 **Answer:**
 Two stand out. First, a silent deduplication bug in the InterviewBit scraper: the URL discovery function was adding URLs to a `seen_urls` set, so when the extraction function later tried to fetch the same URLs, they were already marked as seen and returned `None`. The scraper appeared to work but silently collected zero experiences. This was only caught by checking scraper performance stats in the pipeline output.
 
-Second, the scoring design problem I mentioned — I initially used IDF re-ranking (log N/df) and it pushed Dynamic Programming and Arrays to the bottom because they appear in all experiences. Within a single company's corpus, high document frequency is a positive signal, not a sign of genericness. I replaced IDF with a consistency score (df/N) that boosts rather than penalises universally present topics.
+Second, the scoring design problem — I initially used IDF re-ranking (log N/df) and it pushed Dynamic Programming and Arrays to the bottom because they appear in all experiences. Within a single company's corpus, high document frequency is a positive signal, not a sign of genericness. I replaced IDF with a consistency score (df/N) that boosts rather than penalises universally present topics.
 
 ---
 

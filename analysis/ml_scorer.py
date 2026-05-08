@@ -25,9 +25,11 @@ class SemanticConfidenceScorer:
             return cls._model
         cls._model_tried = True
         try:
-            from sentence_transformers import SentenceTransformer
-            cls._model = SentenceTransformer('all-MiniLM-L6-v2')
-            logger.info("SemanticConfidenceScorer: model loaded (all-MiniLM-L6-v2)")
+            # fastembed uses ONNX Runtime (~50MB) instead of PyTorch (~250MB),
+            # keeping total RAM well within Render free tier's 512MB limit.
+            from fastembed import TextEmbedding
+            cls._model = TextEmbedding("BAAI/bge-small-en-v1.5")
+            logger.info("SemanticConfidenceScorer: fastembed model loaded (BAAI/bge-small-en-v1.5)")
         except Exception as exc:
             logger.warning(f"SemanticConfidenceScorer unavailable — falling back to keyword method: {exc}")
             cls._model = None
@@ -66,10 +68,11 @@ class SemanticConfidenceScorer:
 
             query = f"interview question about {topic_name.replace('_', ' ')}"
             if query not in cls._topic_cache:
-                cls._topic_cache[query] = model.encode(query)
+                # fastembed.embed() returns a generator — consume once and cache
+                cls._topic_cache[query] = list(model.embed([query]))[0]
             topic_emb = np.asarray(cls._topic_cache[query])
 
-            ctx_embs = model.encode(contexts[:6])
+            ctx_embs = list(model.embed(contexts[:6]))
             sims = [
                 float(np.dot(topic_emb, ce) / (norm(topic_emb) * norm(ce) + 1e-10))
                 for ce in ctx_embs

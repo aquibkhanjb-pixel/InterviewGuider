@@ -11,5 +11,10 @@ for pkg in ['punkt', 'punkt_tab', 'stopwords']:
     except Exception as e:
         print(f"NLTK '{pkg}' skipped: {e}")
 
-# sentence-transformers removed from requirements — exceeds Render free tier 512MB RAM.
-# SemanticConfidenceScorer handles ImportError gracefully (returns None for all topics).
+try:
+    from fastembed import TextEmbedding
+    # Trigger model download + ONNX cache at build time so first request is fast
+    list(TextEmbedding("BAAI/bge-small-en-v1.5").embed(["warmup"]))
+    print("fastembed model cached OK")
+except Exception as e:
+    print(f"fastembed model skipped (will download at runtime): {e}")
