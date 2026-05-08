@@ -1,5 +1,6 @@
 import math
 import logging
+import threading
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -7,33 +8,43 @@ logger = logging.getLogger(__name__)
 
 class SemanticConfidenceScorer:
     """
-    Semantic confidence scoring using sentence-transformers.
-    Computes cosine similarity between a topic phrase and the text context
-    around each keyword mention — much more robust than keyword-count heuristics.
-
-    Lazy-loaded: the model is only downloaded/initialised on first use.
-    Falls back to None if the library is unavailable.
+    Semantic confidence scoring via fastembed (ONNX Runtime, ~80MB RAM).
+    The model loads in a background thread so it never blocks request handlers.
+    Requests served before the model is ready simply get semantic_confidence=None
+    and proceed normally. Once loaded, all subsequent requests get scores.
     """
 
     _model = None
-    _model_tried: bool = False
+    _model_ready: bool = False   # True once background load succeeds or fails
+    _load_started: bool = False  # True once the background thread has been kicked off
+    _load_lock = threading.Lock()
     _topic_cache: Dict[str, list] = {}
 
     @classmethod
-    def _get_model(cls):
-        if cls._model_tried:
-            return cls._model
-        cls._model_tried = True
+    def _load_model_background(cls):
+        """Download + warm up the fastembed model in a daemon thread."""
         try:
-            # fastembed uses ONNX Runtime (~50MB) instead of PyTorch (~250MB),
-            # keeping total RAM well within Render free tier's 512MB limit.
             from fastembed import TextEmbedding
-            cls._model = TextEmbedding("BAAI/bge-small-en-v1.5")
-            logger.info("SemanticConfidenceScorer: fastembed model loaded (BAAI/bge-small-en-v1.5)")
+            model = TextEmbedding("BAAI/bge-small-en-v1.5")
+            list(model.embed(["warmup"]))   # triggers actual ONNX session creation
+            cls._model = model
+            logger.info("SemanticConfidenceScorer: fastembed model ready (BAAI/bge-small-en-v1.5)")
         except Exception as exc:
-            logger.warning(f"SemanticConfidenceScorer unavailable — falling back to keyword method: {exc}")
+            logger.warning(f"SemanticConfidenceScorer unavailable: {exc}")
             cls._model = None
-        return cls._model
+        finally:
+            cls._model_ready = True
+
+    @classmethod
+    def _get_model(cls):
+        # Kick off background load on first call (non-blocking)
+        with cls._load_lock:
+            if not cls._load_started:
+                cls._load_started = True
+                t = threading.Thread(target=cls._load_model_background, daemon=True)
+                t.start()
+        # Return whatever state we're in — None until background load finishes
+        return cls._model if cls._model_ready else None
 
     @classmethod
     def score(cls, topic_name: str, topic_keywords: List[str], text: str) -> Optional[float]:
