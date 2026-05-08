@@ -26,7 +26,7 @@ def create_app():
     app.config.from_object(app_config)
     
     # Enable CORS
-    CORS(app)
+    CORS(app, origins=["https://interviewguider.onrender.com", "http://localhost:5173"])
     
     # Initialize database
     db.init_app(app)
