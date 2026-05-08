@@ -88,11 +88,19 @@ def create_app():
     @app.route('/api/health', strict_slashes=False)
     def health():
         from database.connection import db_manager
+        from sqlalchemy import text, inspect
         health_status = db_manager.health_check()
+        tables = []
+        try:
+            inspector = inspect(db.engine)
+            tables = inspector.get_table_names()
+        except Exception as e:
+            tables = [f"error: {e}"]
         return jsonify({
             'status': 'healthy' if health_status else 'unhealthy',
             'database': 'connected' if health_status else 'disconnected',
             'routes_registered': routes_registered,
+            'tables': tables,
             'timestamp': 'now'
         })
     

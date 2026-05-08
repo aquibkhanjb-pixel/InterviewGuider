@@ -39,8 +39,8 @@ def get_companies():
             })
             
     except Exception as e:
-        logger.error(f"Error fetching companies: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
+        logger.error(f"Error fetching companies: {e}", exc_info=True)
+        return jsonify({'error': str(e), 'type': type(e).__name__}), 500
 
 @companies_bp.route('/<company_name>/experiences', methods=['GET'])
 def get_company_experiences(company_name):
