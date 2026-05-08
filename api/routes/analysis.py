@@ -17,6 +17,20 @@ analysis_bp = Blueprint('analysis', __name__)
 logger = logging.getLogger(__name__)
 
 
+def _normalize_company_name(name: str) -> str:
+    """
+    Canonical company name: strip whitespace, title-case each word.
+    Short ALL-CAPS words (≤ 5 chars) are kept as-is so "TCS" stays "TCS"
+    rather than "Tcs", but "AMAZON" (6 chars) becomes "Amazon".
+    """
+    if not name:
+        return name
+    return ' '.join(
+        w if (w.isupper() and len(w) <= 5) else w.capitalize()
+        for w in name.strip().split()
+    )
+
+
 def _set_job(job_id: str, **kwargs):
     """Upsert job fields in the database."""
     with db_manager.get_session() as session:
@@ -52,15 +66,25 @@ def _get_job(job_id: str) -> dict:
         }
 
 
-def _ensure_company(company_name: str):
-    """Create company in DB if it doesn't exist yet."""
+def _ensure_company(company_name: str) -> str:
+    """
+    Create company in DB if it doesn't exist yet.
+    Uses case-insensitive lookup so 'TCS' and 'tcs' map to the same row.
+    Returns the canonical name as stored in the DB.
+    """
+    normalized = _normalize_company_name(company_name)
     with db_manager.get_session() as session:
-        company = session.query(Company).filter(Company.name == company_name).first()
+        # ilike = case-insensitive LIKE — finds 'TCS', 'tcs', 'Tcs' as the same
+        company = session.query(Company).filter(
+            Company.name.ilike(normalized)
+        ).first()
         if not company:
-            company = Company(name=company_name, display_name=company_name)
+            company = Company(name=normalized, display_name=company_name.strip())
             session.add(company)
             session.commit()
-            logger.info(f"Created new company: {company_name}")
+            logger.info(f"Created new company: {normalized}")
+            return normalized
+        return company.name
 
 
 def _run_pipeline(job_id: str, company_name: str, max_experiences: int, force_refresh: bool):
@@ -120,24 +144,25 @@ def trigger_analysis(company_name):
         max_experiences = data.get('max_experiences', 20)
         force_refresh = data.get('force_refresh', False)
 
-        _ensure_company(company_name)
+        # Normalize before storing so 'TCS' and 'tcs' resolve to the same company
+        canonical = _ensure_company(company_name)
 
         job_id = str(uuid.uuid4())[:12]
-        _set_job(job_id, status='queued', company=company_name)
+        _set_job(job_id, status='queued', company=canonical)
 
         thread = threading.Thread(
             target=_run_pipeline,
-            args=(job_id, company_name, max_experiences, force_refresh),
+            args=(job_id, canonical, max_experiences, force_refresh),
             daemon=True
         )
         thread.start()
 
-        logger.info(f"Started job {job_id} for '{company_name}'")
+        logger.info(f"Started job {job_id} for '{canonical}'")
         return jsonify({
             'status': 'started',
             'job_id': job_id,
-            'company': company_name,
-            'message': f'Scraping started for {company_name}. Poll /api/analysis/job/{job_id} for progress.'
+            'company': canonical,
+            'message': f'Scraping started for {canonical}. Poll /api/analysis/job/{job_id} for progress.'
         }), 202
 
     except Exception as e:

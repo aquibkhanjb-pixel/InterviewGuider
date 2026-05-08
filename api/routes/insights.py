@@ -13,6 +13,16 @@ from datetime import datetime
 insights_bp = Blueprint('insights', __name__)
 logger = logging.getLogger(__name__)
 
+
+def _normalize(name: str) -> str:
+    """Mirror of analysis.py normalization so lookups are always consistent."""
+    if not name:
+        return name
+    return ' '.join(
+        w if (w.isupper() and len(w) <= 5) else w.capitalize()
+        for w in name.strip().split()
+    )
+
 # Module-level singleton so AdvancedTopicExtractor (and its pre-compiled regex
 # patterns) is built once per process, not once per request.
 _generator = None
@@ -66,11 +76,12 @@ def get_company_insights(company_name):
     includes tfidf_score, discriminative_score, idf, and semantic_confidence.
     """
     try:
+        company_name = _normalize(company_name)
         logger.info(f"Generating insights for {company_name}")
 
         with db_manager.get_session() as session:
             company = session.query(Company).filter(
-                Company.name == company_name
+                Company.name.ilike(company_name)
             ).first()
 
             if not company:
@@ -187,9 +198,10 @@ def get_company_insights(company_name):
 def get_recommendations(company_name):
     """Get study recommendations derived from the full ML insights."""
     try:
+        company_name = _normalize(company_name)
         with db_manager.get_session() as session:
             company = session.query(Company).filter(
-                Company.name == company_name
+                Company.name.ilike(company_name)
             ).first()
 
             if not company:

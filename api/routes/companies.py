@@ -51,7 +51,7 @@ def get_company_experiences(company_name):
         
         with db_manager.get_session() as session:
             company = session.query(Company).filter(
-                Company.name == company_name
+                Company.name.ilike(company_name.strip())
             ).first()
             
             if not company:

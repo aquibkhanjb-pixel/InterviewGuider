@@ -16,11 +16,22 @@ import {
 import { Add } from '@mui/icons-material';
 import { interviewAPI } from '../../services/api.js';
 
+/** Client-side company name validator — rejects obvious non-names. */
+const validateCompanyName = (name) => {
+  const s = name.trim();
+  if (s.length < 2) return 'Name must be at least 2 characters.';
+  if (!/[a-zA-Z]/.test(s)) return 'Name must contain at least one letter.';
+  if (/^\d+$/.test(s)) return 'A company name cannot be only numbers.';
+  if (/^[^a-zA-Z0-9]+$/.test(s)) return 'Please enter a valid company name.';
+  return null; // valid
+};
+
 const CompanySelector = ({ selectedCompanies, onSelectionChange, maxSelection = 5 }) => {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [customInput, setCustomInput] = useState('');
+  const [inputError, setInputError] = useState('');
 
   useEffect(() => {
     fetchCompanies();
@@ -58,17 +69,32 @@ const CompanySelector = ({ selectedCompanies, onSelectionChange, maxSelection = 
   const handleAddCustom = () => {
     const name = customInput.trim();
     if (!name) return;
-    if (selectedCompanies.includes(name)) {
+
+    const validationError = validateCompanyName(name);
+    if (validationError) {
+      setInputError(validationError);
+      return;
+    }
+    setInputError('');
+
+    // Case-insensitive duplicate check against both already-selected and known companies
+    const nameLower = name.toLowerCase();
+    const alreadySelected = selectedCompanies.some(c => c.toLowerCase() === nameLower);
+    if (alreadySelected) {
       setCustomInput('');
       return;
     }
     if (selectedCompanies.length >= maxSelection) return;
-    onSelectionChange([...selectedCompanies, name]);
+
+    // If the company already exists in our DB list, use the canonical DB name
+    const existing = companies.find(c => c.name.toLowerCase() === nameLower);
+    onSelectionChange([...selectedCompanies, existing ? existing.name : name]);
     setCustomInput('');
   };
 
   const handleCustomKeyDown = (e) => {
     if (e.key === 'Enter') handleAddCustom();
+    else if (inputError) setInputError(''); // clear error on any new typing
   };
 
   if (loading) {
@@ -126,9 +152,11 @@ const CompanySelector = ({ selectedCompanies, onSelectionChange, maxSelection = 
           fullWidth
           label="Type company name (e.g. TCS, Capgemini, Infosys…)"
           value={customInput}
-          onChange={(e) => setCustomInput(e.target.value)}
+          onChange={(e) => { setCustomInput(e.target.value); if (inputError) setInputError(''); }}
           onKeyDown={handleCustomKeyDown}
           disabled={selectedCompanies.length >= maxSelection}
+          error={!!inputError}
+          helperText={inputError || ''}
         />
         <Button
           variant="contained"
@@ -141,9 +169,11 @@ const CompanySelector = ({ selectedCompanies, onSelectionChange, maxSelection = 
         </Button>
       </Box>
 
-      <Typography variant="caption" color="textSecondary" sx={{ mt: 0.5, display: 'block' }}>
-        Any company name works — the scraper will search for it automatically.
-      </Typography>
+      {!inputError && (
+        <Typography variant="caption" color="textSecondary" sx={{ mt: 0.5, display: 'block' }}>
+          Any company name works. If no data is found after analysis, the company may not have public interview experiences yet.
+        </Typography>
+      )}
 
       {/* Selected chips */}
       {selectedCompanies.length > 0 && (

@@ -23,12 +23,23 @@ import ExperiencesList from '../ExperiencesList/ExperiencesList.jsx';
 import { interviewAPI } from '../../services/api.js';
 
 const Dashboard = ({ onNotification }) => {
-  const [selectedCompanies, setSelectedCompanies] = useState([]);
+  // Persist company selection across page refreshes
+  const [selectedCompanies, setSelectedCompanies] = useState(() => {
+    try {
+      const stored = localStorage.getItem('selectedCompanies');
+      return stored ? JSON.parse(stored) : [];
+    } catch { return []; }
+  });
   const [insights, setInsights] = useState({});
   const [loading, setLoading] = useState(false);
   const [analysisLoading, setAnalysisLoading] = useState({});
   const [companiesData, setCompaniesData] = useState([]);
   const navigate = useNavigate();
+
+  // Persist selection to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('selectedCompanies', JSON.stringify(selectedCompanies));
+  }, [selectedCompanies]);
 
   // Fetch companies list once on mount so we know which have data
   useEffect(() => {
@@ -37,35 +48,55 @@ const Dashboard = ({ onNotification }) => {
       .catch(() => {});
   }, []);
 
-  // Auto-load insights only when the user actively selects companies that already have data.
-  // An empty initial selection ensures no API call fires on page load.
+  // Auto-load insights when companies are selected — on mount this reloads persisted selections.
+  // An empty selection naturally returns early (no API call on a blank slate).
   useEffect(() => {
     if (selectedCompanies.length === 0) return;
     loadInsights(selectedCompanies);
+  }, [selectedCompanies]);
+
+  // Remove insights for companies that have been deselected
+  useEffect(() => {
+    setInsights(prev => {
+      const active = new Set(selectedCompanies);
+      const pruned = Object.fromEntries(
+        Object.entries(prev).filter(([key]) => active.has(key))
+      );
+      return Object.keys(pruned).length === Object.keys(prev).length ? prev : pruned;
+    });
   }, [selectedCompanies]);
 
   const loadInsights = async (companiesToLoad = selectedCompanies) => {
     setLoading(true);
     try {
       // Re-fetch companies list so we have fresh experience counts
-      let withData = new Set();
+      // Map: lowercase name → { canonicalName, hasData } for case-insensitive lookup
+      let companyMap = new Map(); // 'tcs' → 'TCS' (canonical name from DB)
+      let hasDataSet = new Set(); // lowercase names that have experiences
       try {
         const res = await interviewAPI.getCompanies();
         const list = res.data.companies || [];
         setCompaniesData(list);
-        withData = new Set(list.filter(c => c.experience_count > 0).map(c => c.name));
+        list.forEach(c => {
+          companyMap.set(c.name.toLowerCase(), c.name);
+          if (c.experience_count > 0) hasDataSet.add(c.name.toLowerCase());
+        });
       } catch (_) { /* non-fatal — fall through and call insights anyway */ }
 
       // Collect results for just the requested companies (functional update preserves the rest)
       const fetched = {};
       for (const company of companiesToLoad) {
+        const lc = company.toLowerCase();
+        // Resolve to the canonical DB name (handles TCS vs tcs vs Tcs)
+        const canonicalName = companyMap.get(lc) || company;
+
         // If we know the company has no data, skip the ML call immediately
-        if (withData.size > 0 && !withData.has(company)) {
+        if (hasDataSet.size > 0 && !hasDataSet.has(lc) && companyMap.has(lc)) {
           fetched[company] = { status: 'no_data', company };
           continue;
         }
         try {
-          const response = await interviewAPI.getCompanyInsights(company);
+          const response = await interviewAPI.getCompanyInsights(canonicalName);
           fetched[company] = response.data;
         } catch (error) {
           console.error(`Error loading insights for ${company}:`, error);
@@ -91,6 +122,8 @@ const Dashboard = ({ onNotification }) => {
       });
 
       const jobId = startRes.data.job_id;
+      // Backend may return the canonical name (e.g. 'TCS' for user input 'tcs')
+      const canonicalCompany = startRes.data.company || company;
       if (!jobId) throw new Error('No job ID returned from server');
 
       // Poll every 6 seconds until done or failed
@@ -122,7 +155,8 @@ const Dashboard = ({ onNotification }) => {
                   'success'
                 );
               }
-              setTimeout(() => loadInsights([company]), 800);
+              // Use canonical company name for the reload (avoids case-mismatch after normalization)
+              setTimeout(() => loadInsights([canonicalCompany]), 800);
               resolve();
             } else if (status === 'failed') {
               clearInterval(interval);
@@ -270,7 +304,7 @@ const Dashboard = ({ onNotification }) => {
                       onClick={() => triggerAnalysis(company)}
                       disabled={analysisLoading[company]}
                     >
-                      {analysisLoading[company] ? 'Analyzing...' : 'Run Analysis'}
+                      {analysisLoading[company] ? 'Analyzing...' : (summary ? 'Update Data' : 'Run Analysis')}
                     </Button>
                   </CardActions>
                 </Card>
@@ -279,10 +313,12 @@ const Dashboard = ({ onNotification }) => {
           })}
         </Grid>
 
-        {/* Detailed Insights */}
+        {/* Detailed Insights — only for companies with real live data */}
         {Object.keys(insights).length > 0 && (
           <Grid container spacing={4}>
-            {Object.entries(insights).map(([company, companyInsights]) => (
+            {Object.entries(insights).map(([company, companyInsights]) => {
+              if (companyInsights?.status !== 'live_data') return null;
+              return (
               <Grid item xs={12} key={company}>
                 <Card elevation={2}>
                   <CardContent sx={{ p: 4 }}>
@@ -314,7 +350,8 @@ const Dashboard = ({ onNotification }) => {
                   </CardContent>
                 </Card>
               </Grid>
-            ))}
+              );
+            })}
           </Grid>
         )}
       </Container>
