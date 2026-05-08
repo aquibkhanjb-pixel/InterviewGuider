@@ -10,10 +10,10 @@ python-dateutil==2.8.2
 # NLP - Using compatible versions
 nltk==3.8.1
 
-# ML scoring — fastembed uses ONNX Runtime (~50MB) instead of PyTorch (~250MB)
-# so semantic confidence scoring works within Render free tier 512MB RAM
-fastembed>=0.3.0
+# ML scoring
 scikit-learn>=1.3.0
+# fastembed (ONNX semantic scoring) requires paid tier RAM — disabled on free tier
+# To enable: add fastembed>=0.3.0 and set ENABLE_SEMANTIC_SCORING=true env var
 
 # Math libraries
 numpy>=2.1.1

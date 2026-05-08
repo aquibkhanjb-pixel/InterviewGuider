@@ -1,50 +1,47 @@
 import math
 import logging
-import threading
+import os
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Semantic scoring requires fastembed (ONNX Runtime).
+# On Render free tier (512MB RAM, 0.1 vCPU) loading onnxruntime's native
+# libraries off slow disk takes 60+ seconds and blocks request threads.
+# Enable only when ENABLE_SEMANTIC_SCORING=true is set (paid tier / local dev).
+_SEMANTIC_ENABLED = os.getenv('ENABLE_SEMANTIC_SCORING', '').lower() == 'true'
+
 
 class SemanticConfidenceScorer:
     """
-    Semantic confidence scoring via fastembed (ONNX Runtime, ~80MB RAM).
-    The model loads in a background thread so it never blocks request handlers.
-    Requests served before the model is ready simply get semantic_confidence=None
-    and proceed normally. Once loaded, all subsequent requests get scores.
+    Semantic confidence scorer — computes cosine similarity between a topic
+    phrase and context windows around keyword hits in the experience text.
+
+    Uses fastembed (ONNX Runtime, ~80MB) when ENABLE_SEMANTIC_SCORING=true.
+    Falls back to None gracefully so keyword + consistency scoring still works.
+
+    Architecture is fully implemented; disabled on free-tier deployment only.
     """
 
     _model = None
-    _model_ready: bool = False   # True once background load succeeds or fails
-    _load_started: bool = False  # True once the background thread has been kicked off
-    _load_lock = threading.Lock()
+    _model_tried: bool = False
     _topic_cache: Dict[str, list] = {}
 
     @classmethod
-    def _load_model_background(cls):
-        """Download + warm up the fastembed model in a daemon thread."""
+    def _get_model(cls):
+        if not _SEMANTIC_ENABLED:
+            return None
+        if cls._model_tried:
+            return cls._model
+        cls._model_tried = True
         try:
             from fastembed import TextEmbedding
-            model = TextEmbedding("BAAI/bge-small-en-v1.5")
-            list(model.embed(["warmup"]))   # triggers actual ONNX session creation
-            cls._model = model
-            logger.info("SemanticConfidenceScorer: fastembed model ready (BAAI/bge-small-en-v1.5)")
+            cls._model = TextEmbedding("BAAI/bge-small-en-v1.5")
+            logger.info("SemanticConfidenceScorer: fastembed model loaded")
         except Exception as exc:
             logger.warning(f"SemanticConfidenceScorer unavailable: {exc}")
             cls._model = None
-        finally:
-            cls._model_ready = True
-
-    @classmethod
-    def _get_model(cls):
-        # Kick off background load on first call (non-blocking)
-        with cls._load_lock:
-            if not cls._load_started:
-                cls._load_started = True
-                t = threading.Thread(target=cls._load_model_background, daemon=True)
-                t.start()
-        # Return whatever state we're in — None until background load finishes
-        return cls._model if cls._model_ready else None
+        return cls._model
 
     @classmethod
     def score(cls, topic_name: str, topic_keywords: List[str], text: str) -> Optional[float]:
