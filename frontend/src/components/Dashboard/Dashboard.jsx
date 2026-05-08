@@ -77,7 +77,14 @@ const Dashboard = ({ onNotification }) => {
 
       // Poll every 6 seconds until done or failed
       await new Promise((resolve, reject) => {
+        const maxWaitMs = 5 * 60 * 1000; // 5 minutes
+        const startedAt = Date.now();
         const interval = setInterval(async () => {
+          if (Date.now() - startedAt > maxWaitMs) {
+            clearInterval(interval);
+            reject(new Error('Analysis timed out after 5 minutes'));
+            return;
+          }
           try {
             const poll = await interviewAPI.getJobStatus(jobId);
             const { status, result, error } = poll.data;
@@ -105,8 +112,12 @@ const Dashboard = ({ onNotification }) => {
             }
             // status === 'running' or 'queued' → keep polling
           } catch (pollErr) {
-            clearInterval(interval);
-            reject(pollErr);
+            // 404 can happen transiently; keep polling unless it's a hard failure
+            const is404 = pollErr?.response?.status === 404;
+            if (!is404) {
+              clearInterval(interval);
+              reject(pollErr);
+            }
           }
         }, 6000);
       });
