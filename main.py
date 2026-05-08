@@ -104,6 +104,47 @@ def create_app():
             'timestamp': 'now'
         })
     
+    @app.route('/api/debug/insights/<company_name>')
+    def debug_insights(company_name):
+        """Temporary debug endpoint — returns error traceback as 200 so it's visible."""
+        import traceback
+        try:
+            from database.connection import db_manager
+            from database.models import Company, InterviewExperience
+            from datetime import datetime as _dt
+
+            with db_manager.get_session() as session:
+                company = session.query(Company).filter(Company.name == company_name).first()
+                if not company:
+                    return jsonify({'error': 'company not found'})
+                rows = session.query(InterviewExperience).filter(
+                    InterviewExperience.company_id == company.id
+                ).limit(3).all()
+                experiences = [
+                    {
+                        'id': r.id,
+                        'title': r.title or '',
+                        'content': r.content or '',
+                        'experience_date': r.experience_date or _dt.utcnow(),
+                        'time_weight': r.time_weight if r.time_weight is not None else 1.0,
+                        'source_platform': r.source_platform,
+                        'outcome': 'unknown',
+                    }
+                    for r in rows
+                ]
+
+            from analysis.topic_extractor import AdvancedTopicExtractor
+            te = AdvancedTopicExtractor()
+            sample = te.extract_topics_from_experience(experiences[0]) if experiences else {}
+
+            from analysis.insights_generator import CompanyInsightsGenerator
+            gen = CompanyInsightsGenerator()
+            result = gen.generate_comprehensive_insights(company_name, experiences)
+            return jsonify({'ok': True, 'sample_topics': list(sample.get('topics', {}).keys())[:5], 'status': result.get('status', 'unknown')})
+
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
     @app.route('/api/docs')
     def docs():
         return jsonify({
