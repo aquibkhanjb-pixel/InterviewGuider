@@ -13,6 +13,21 @@ from datetime import datetime
 insights_bp = Blueprint('insights', __name__)
 logger = logging.getLogger(__name__)
 
+# Module-level singleton so AdvancedTopicExtractor (and its pre-compiled regex
+# patterns) is built once per process, not once per request.
+_generator = None
+
+def _get_generator():
+    global _generator
+    if _generator is None:
+        from analysis.insights_generator import CompanyInsightsGenerator
+        _generator = CompanyInsightsGenerator()
+    return _generator
+
+# Simple in-process cache: (company_name, experience_count, last_scraped) -> response dict
+# Cleared automatically when the process restarts (e.g. after a new deploy).
+_insights_cache: dict = {}
+
 
 def _load_experiences(session, company) -> list:
     """
@@ -96,9 +111,14 @@ def get_company_insights(company_name):
                 else datetime.utcnow().isoformat()
             )
 
-        # Run ML-augmented insights generation outside the DB session
-        from analysis.insights_generator import CompanyInsightsGenerator
-        gen = CompanyInsightsGenerator()
+        # Run ML-augmented insights generation outside the DB session.
+        # Reuse the singleton generator so compiled regex patterns are not rebuilt.
+        cache_key = (company_name, total_experiences, last_updated)
+        if cache_key in _insights_cache:
+            logger.info(f"Returning cached insights for {company_name}")
+            return jsonify(_insights_cache[cache_key])
+
+        gen = _get_generator()
         full = gen.generate_comprehensive_insights(company_name, experiences)
 
         if full.get('status') == 'insufficient_data':
@@ -128,7 +148,7 @@ def get_company_insights(company_name):
         )
 
         quality = full.get('data_quality', {})
-        return jsonify({
+        response_data = {
             'company':  company_name,
             'insights': detailed_topics,
             'top_5_topics':         full.get('topic_insights', {}).get('top_5_topics', []),
@@ -147,7 +167,9 @@ def get_company_insights(company_name):
             'study_recommendations':       full.get('study_recommendations', {}),
             'status':  'live_data',
             'message': f'ML-augmented insights from {total_experiences} experiences',
-        })
+        }
+        _insights_cache[cache_key] = response_data
+        return jsonify(response_data)
 
     except Exception as e:
         import traceback
@@ -190,8 +212,7 @@ def get_recommendations(company_name):
 
             experiences = _load_experiences(session, company)
 
-        from analysis.insights_generator import CompanyInsightsGenerator
-        gen = CompanyInsightsGenerator()
+        gen = _get_generator()
         full = gen.generate_comprehensive_insights(company_name, experiences)
 
         study_recs  = full.get('study_recommendations', {})

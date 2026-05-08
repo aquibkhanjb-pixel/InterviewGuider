@@ -213,9 +213,8 @@ class CompanyInsightsGenerator:
             avg_importance = np.mean(importances)
             avg_confidence = np.mean(confidences)
 
-            # Frequency statistics
-            freq_std = np.std([f / analyses[i]['experience_metadata'].get('time_weight', 1.0)
-                               for i, f in enumerate(frequencies)])
+            # Frequency statistics — use the already-weighted values directly
+            freq_std = float(np.std(frequencies)) if len(frequencies) > 1 else 0.0
 
             # Averaged semantic confidence (None when model unavailable)
             sem_list = topic_semantic_scores[topic]

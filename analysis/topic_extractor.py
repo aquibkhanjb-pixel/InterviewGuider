@@ -73,6 +73,24 @@ class AdvancedTopicExtractor:
 
         # Difficulty indicators
         self.difficulty_patterns = self._build_difficulty_patterns()
+
+        # Pre-compile keyword patterns once (avoids O(keywords) re-compilation per call)
+        self.compiled_keyword_patterns = {
+            kw: re.compile(r'\b' + re.escape(kw) + r'\b')
+            for kw in self.keyword_lookup
+        }
+
+        # Pre-compile interview round patterns
+        _round_keywords = {
+            'coding': ['coding', 'algorithm', 'data structure', 'leetcode', 'hackerrank'],
+            'system_design': ['system design', 'architecture', 'scalability', 'design'],
+            'behavioral': ['behavioral', 'culture fit', 'leadership', 'teamwork', 'conflict'],
+            'technical_discussion': ['technical discussion', 'past projects', 'experience', 'deep dive'],
+        }
+        self._round_type_patterns = {
+            rt: [re.compile(r'\b' + re.escape(kw) + r'\b', re.IGNORECASE) for kw in kws]
+            for rt, kws in _round_keywords.items()
+        }
     
     def _build_keyword_dictionary(self) -> Dict[str, Dict[str, List[str]]]:
         """Build comprehensive technical keyword dictionary."""
@@ -240,37 +258,32 @@ class AdvancedTopicExtractor:
     def _extract_by_keywords(self, text: str) -> Dict[str, int]:
         """Extract topics using direct keyword matching."""
         topics = defaultdict(int)
-        
         for keyword, info in self.keyword_lookup.items():
-            # Use word boundary matching for better accuracy
-            pattern = r'\b' + re.escape(keyword) + r'\b'
-            matches = re.findall(pattern, text)
-            
+            matches = self.compiled_keyword_patterns[keyword].findall(text)
             if matches:
                 topic_key = f"{info['category']}.{info['topic']}"
                 topics[topic_key] += len(matches)
-        
         return dict(topics)
     
     def _extract_by_context(self, text: str) -> Dict[str, int]:
         """Extract topics using context patterns."""
         topics = defaultdict(int)
-        
         for context_type, patterns in self.context_patterns.items():
             for pattern in patterns:
-                matches = re.finditer(pattern, text, re.IGNORECASE)
-                
-                for match in matches:
-                    # Extract the captured term
-                    if match.groups():
-                        term = match.group(1).strip()
-                        
-                        # Check if term matches our keywords
-                        for keyword, info in self.keyword_lookup.items():
-                            if keyword in term or term in keyword:
-                                topic_key = f"{info['category']}.{info['topic']}"
-                                topics[topic_key] += 1
-        
+                for match in re.finditer(pattern, text, re.IGNORECASE):
+                    if not match.groups():
+                        continue
+                    term = match.group(1).strip().lower()
+                    # Direct dict lookup first (O(1)), then word-by-word scan
+                    if term in self.keyword_lookup:
+                        info = self.keyword_lookup[term]
+                        topics[f"{info['category']}.{info['topic']}"] += 1
+                    else:
+                        for word in term.split():
+                            if word in self.keyword_lookup:
+                                info = self.keyword_lookup[word]
+                                topics[f"{info['category']}.{info['topic']}"] += 1
+                                break
         return dict(topics)
     
     def _extract_by_patterns(self, text: str) -> Dict[str, int]:
@@ -455,26 +468,14 @@ class AdvancedTopicExtractor:
     
     def _classify_interview_rounds(self, text: str) -> Dict:
         """Classify different types of interview rounds."""
-        round_types = {
-            'coding': ['coding', 'algorithm', 'data structure', 'leetcode', 'hackerrank'],
-            'system_design': ['system design', 'architecture', 'scalability', 'design'],
-            'behavioral': ['behavioral', 'culture fit', 'leadership', 'teamwork', 'conflict'],
-            'technical_discussion': ['technical discussion', 'past projects', 'experience', 'deep dive']
-        }
-        
         round_classifications = {}
-        
-        for round_type, keywords in round_types.items():
-            score = 0
-            for keyword in keywords:
-                score += len(re.findall(r'\b' + re.escape(keyword) + r'\b', text, re.IGNORECASE))
-            
+        for round_type, patterns in self._round_type_patterns.items():
+            score = sum(len(p.findall(text)) for p in patterns)
             if score > 0:
                 round_classifications[round_type] = {
                     'score': score,
-                    'confidence': min(score / 3.0, 1.0)  # Normalize confidence
+                    'confidence': min(score / 3.0, 1.0),
                 }
-        
         return round_classifications
     
     def _extract_key_insights(self, text: str) -> List[str]:
