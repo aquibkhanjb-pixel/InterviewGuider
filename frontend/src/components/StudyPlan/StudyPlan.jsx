@@ -38,14 +38,14 @@ import {
   Psychology,
 } from '@mui/icons-material';
 
-/** Small badge showing how company-specific a topic is based on TF-IDF discriminative_score */
+/** Small badge showing how consistently a topic appears across experiences */
 const SpecificityBadge = ({ score }) => {
   if (score == null) return null;
   const pct = Math.round(score * 100);
   const [label, color] =
-    score >= 0.7 ? ['Highly specific', 'secondary'] :
-    score >= 0.4 ? ['Company-relevant', 'info'] :
-                   ['Generic topic', 'default'];
+    score >= 0.7 ? ['Very consistent', 'secondary'] :
+    score >= 0.4 ? ['Fairly consistent', 'info'] :
+                   ['Occasional', 'default'];
   return (
     <Chip
       icon={<Fingerprint sx={{ fontSize: 14 }} />}

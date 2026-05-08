@@ -24,9 +24,9 @@ const priorityColor = (level, alpha = 0.8) => {
 };
 
 const discColor = (score, alpha = 0.8) => {
-  if (score >= 0.7) return `rgba(156, 39, 176, ${alpha})`;   // purple — highly specific
-  if (score >= 0.4) return `rgba(33, 150, 243, ${alpha})`;   // blue — moderately specific
-  return `rgba(158, 158, 158, ${alpha})`;                     // grey — generic
+  if (score >= 0.7) return `rgba(156, 39, 176, ${alpha})`;   // purple — very consistent
+  if (score >= 0.4) return `rgba(33, 150, 243, ${alpha})`;   // blue — fairly consistent
+  return `rgba(158, 158, 158, ${alpha})`;                     // grey — occasional
 };
 
 const InsightsChart = ({ insights, title = 'Topic Analysis' }) => {
@@ -70,7 +70,7 @@ const InsightsChart = ({ insights, title = 'Topic Analysis' }) => {
             if (!d) return '';
             const lines = [`Priority: ${d.priority_level}`, `Confidence: ${d.confidence_score}`];
             if (d.discriminative_score != null)
-              lines.push(`Company-specific: ${Math.round(d.discriminative_score * 100)}%`);
+              lines.push(`Consistency: ${Math.round(d.discriminative_score * 100)}%`);
             if (d.semantic_confidence != null)
               lines.push(`Semantic confidence: ${d.semantic_confidence}`);
             return lines;
@@ -85,7 +85,7 @@ const InsightsChart = ({ insights, title = 'Topic Analysis' }) => {
   const discData = {
     labels,
     datasets: [{
-      label: 'Company-Specificity Score (%)',
+      label: 'Consistency Score (%)',
       data: topicEntries.map(([, d]) => Math.round((d.discriminative_score ?? 0) * 100)),
       backgroundColor: topicEntries.map(([, d]) => discColor(d.discriminative_score ?? 0)),
       borderColor:     topicEntries.map(([, d]) => discColor(d.discriminative_score ?? 0, 1)),
@@ -105,8 +105,8 @@ const InsightsChart = ({ insights, title = 'Topic Analysis' }) => {
             if (!d) return '';
             const lines = [
               `Frequency: ${d.weighted_frequency}%`,
-              `IDF: ${d.idf ?? 'N/A'}`,
-              `TF-IDF score: ${d.tfidf_score ?? 'N/A'}`,
+              `Consistency: ${d.consistency_score ?? d.discriminative_score ?? 'N/A'}`,
+              `Frequency score: ${d.frequency_score ?? 'N/A'}`,
             ];
             if (d.semantic_confidence != null)
               lines.push(`Semantic confidence: ${d.semantic_confidence}`);
@@ -119,7 +119,7 @@ const InsightsChart = ({ insights, title = 'Topic Analysis' }) => {
       y: {
         beginAtZero: true,
         max: 100,
-        title: { display: true, text: 'Specificity (%)' },
+        title: { display: true, text: 'Consistency (%)' },
       },
     },
   };
@@ -172,7 +172,7 @@ const InsightsChart = ({ insights, title = 'Topic Analysis' }) => {
               </ToggleButton>
               <ToggleButton value="discriminative">
                 <Fingerprint sx={{ mr: 0.5, fontSize: 16 }} />
-                Company-Specific
+                Consistency
               </ToggleButton>
             </ToggleButtonGroup>
           </Box>
@@ -194,13 +194,13 @@ const InsightsChart = ({ insights, title = 'Topic Analysis' }) => {
             ) : (
               <>
                 <Typography variant="subtitle1" gutterBottom>
-                  Company-Specificity — TF-IDF score showing topics unique to this company
+                  Consistency — how reliably each topic appears across interviews
                 </Typography>
                 <Box sx={{ height: 10, display: 'flex', gap: 2, mb: 1, flexWrap: 'wrap' }}>
                   {[
-                    { color: 'rgba(156,39,176,0.8)', label: '≥70% — highly specific' },
-                    { color: 'rgba(33,150,243,0.8)', label: '40–70% — moderately specific' },
-                    { color: 'rgba(158,158,158,0.8)', label: '<40% — generic topic' },
+                    { color: 'rgba(156,39,176,0.8)', label: '≥70% — very consistent' },
+                    { color: 'rgba(33,150,243,0.8)', label: '40–70% — fairly consistent' },
+                    { color: 'rgba(158,158,158,0.8)', label: '<40% — occasional topic' },
                   ].map(({ color, label }) => (
                     <Box key={label} display="flex" alignItems="center" gap={0.5} mt={0}>
                       <Box sx={{ width: 12, height: 12, borderRadius: '2px', bgcolor: color, flexShrink: 0 }} />

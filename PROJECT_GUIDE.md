@@ -16,12 +16,12 @@ The gaps this creates:
 
 ## 2. Solution
 
-**Interview Intelligence System** is a full-stack ML-powered web application that automatically scrapes interview experiences from multiple platforms, extracts technical topics from the raw text using NLP, scores and ranks those topics using TF-IDF and semantic similarity, and presents actionable study insights through a React dashboard.
+**Interview Intelligence System** is a full-stack ML-powered web application that automatically scrapes interview experiences from multiple platforms, extracts technical topics from the raw text using NLP, scores and ranks those topics using consistency scoring and semantic similarity, and presents actionable study insights through a React dashboard.
 
 A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 - A ranked list of topics that actually appear in that company's interviews
 - A confidence score per topic (how certain we are it matters)
-- A company-specific vs. generic split (is this topic uniquely Amazon, or just standard DSA?)
+- A consistency score per topic (does this topic appear in most interviews or just a few?)
 - A study plan with priority levels and recommended resources
 
 ---
@@ -46,7 +46,7 @@ A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 │  PIPELINE MANAGER │       │      INSIGHTS GENERATOR           │
 │                   │       │                                   │
 │  6 Scrapers run   │       │  1. topic_extractor per exp       │
-│  concurrently:    │       │  2. tfidf_rerank (IDF scoring)    │
+│  concurrently:    │       │  2. consistency_rerank (df/N)     │
 │  - GeeksForGeeks  │       │  3. SemanticConfidenceScorer      │
 │  - InterviewBit   │       │     (all-MiniLM-L6-v2)           │
 │  - AmbitionBox    │       │  4. Aggregate → priority + recs   │
@@ -69,7 +69,7 @@ A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 | API | Flask 3.0 + Flask-CORS | REST endpoints, job queue |
 | Scraping | requests + BeautifulSoup | Raw experience collection |
 | NLP | NLTK + keyword dictionary | Topic extraction from text |
-| ML Scoring | sentence-transformers + math | Semantic confidence + TF-IDF |
+| ML Scoring | sentence-transformers + math | Semantic confidence + consistency scoring |
 | Database | PostgreSQL + SQLAlchemy 2.0 | Persistent storage |
 | Deployment | Render (backend) + Vercel (frontend) | Cloud hosting |
 
@@ -84,7 +84,7 @@ A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 7. `SemanticConfidenceScorer` embeds each topic phrase and surrounding context windows using `all-MiniLM-L6-v2`, computes cosine similarity as a confirmation signal
 8. Frontend polls `GET /api/jobs/<job_id>` every 6 seconds until status = `completed`
 9. User visits insights → Frontend calls `GET /api/insights/<company>`
-10. `CompanyInsightsGenerator` reads all stored experiences, runs `tfidf_rerank()` to compute IDF and discriminative scores, sorts topics by a blended rank (60% frequency + 40% discriminativeness), returns the full payload
+10. `CompanyInsightsGenerator` reads all stored experiences, runs `consistency_rerank()` to compute how reliably each topic appears (df / n_experiences), sorts topics by a blended rank (60% frequency + 40% consistency), returns the full payload
 11. Dashboard renders the topic chart, study plan with specificity badges, and raw experiences list
 
 ---
@@ -115,19 +115,19 @@ A user selects a company, clicks "Run Analysis", and within 1-2 minutes gets:
 >
 > On top of that, I added a semantic layer using sentence-transformers. The model is `all-MiniLM-L6-v2` — it's small and fast. For each topic keyword match in the text, I extract a 300-character window around it and compute cosine similarity between that context window and a topic description like 'interview question about dynamic programming'. This tells me whether the keyword is being used meaningfully, not just mentioned in passing.
 >
-> Then I apply TF-IDF re-ranking. I calculate IDF as log(N/df) where N is the total number of experiences and df is how many experiences mention that topic. A topic that shows up in every experience gets a low IDF — it's generic. A topic that shows up in 6 out of 20 experiences for Amazon specifically gets a higher discriminative score. I blend frequency rank and discriminative rank 60/40 to avoid demoting genuinely important universal topics."
+> Then I apply consistency re-ranking. For each topic I compute df divided by N — the fraction of experiences where that topic appears. A topic appearing in every Amazon experience gets consistency 1.0, which is the strongest possible signal to study it. I blend frequency rank and consistency rank 60/40, so both signals reinforce each other. I deliberately avoided IDF here because IDF penalises topics that appear in all experiences — which is exactly backwards for a within-company analysis. IDF makes sense cross-company, to separate what's uniquely Amazon from what every company asks, but not within one company's corpus."
 
 ---
 
 **Talk about the frontend (30 seconds)**
 
-> "The frontend is React with Material UI. The main view is a bar chart that lets you switch between frequency view and discriminative score view — so you can see both 'what's common' and 'what's Amazon-specific'. The study plan shows each topic with two badges: a Specificity badge based on TF-IDF and an AI Confidence badge from the semantic model."
+> "The frontend is React with Material UI. The main view is a bar chart with two modes — frequency view and consistency view — so you can see both how often a topic comes up and how reliably it appears across interviews. The study plan shows each topic with two badges: a Consistency badge and an AI Confidence badge from the semantic model."
 
 ---
 
 **End with results or learnings (30 seconds)**
 
-> "The biggest technical challenge was making the NLP robust on noisy scraped text — interview posts are very informal. I had to build out a large stopword list and context-window extraction to avoid false positives. Another challenge was the blended sort — pure TF-IDF would rank universal topics like Arrays last because they appear in every post, which defeats the purpose. The 60/40 blend was a deliberate design choice to handle that."
+> "The biggest technical challenge was making the NLP robust on noisy scraped text — interview posts are very informal. I had to build out a large stopword list and context-window extraction to avoid false positives. Another challenge was the scoring design — I initially implemented IDF re-ranking, which actively penalised topics that appear in all experiences. But within a single company's corpus, high document frequency IS the signal — if Arrays appear in 9 out of 9 Amazon experiences, that's the strongest possible reason to study them. I switched to a consistency score (df / N) that reinforces high-frequency topics instead of demoting them."
 
 ---
 
@@ -142,10 +142,14 @@ Most of these platforms — GeeksForGeeks, InterviewBit, AmbitionBox — do not 
 
 ---
 
-### Q2. How does your TF-IDF scoring work and why did you customise it?
+### Q2. Why did you not use TF-IDF for ranking, and what did you use instead?
 
 **Answer:**
-Standard TF-IDF in document retrieval would demote any topic that appears in every document to near-zero IDF (since log(N/N) = 0). That's a problem here — if Dynamic Programming shows up in all 25 Amazon experiences, it should still rank high because it's genuinely important. So I compute IDF = log(N/df) but sort using a blended rank: 60% of the sort weight comes from raw frequency rank and 40% from discriminative score (normalised TF-IDF). This keeps universal important topics near the top while still surfacing uniquely concentrated ones alongside them.
+TF-IDF uses IDF = log(N/df) to penalise topics that appear in many documents. In cross-document retrieval that makes sense — a word in every document carries no discriminative information. But this system analyses a single company's corpus. If Dynamic Programming appears in all 25 Amazon experiences, that high document frequency is exactly the signal the user needs — it means Amazon reliably tests DP. Applying IDF would score it at log(25/25) = 0 and bury it, which is the opposite of useful.
+
+So instead I use a consistency score: df / N, the fraction of experiences where the topic appears. A topic present in every experience gets consistency 1.0 — highest priority. A topic appearing in only 2 experiences gets 0.08 — treat with caution. The final sort blends 60% frequency rank with 40% consistency rank, so both signals reinforce each other.
+
+IDF remains the right tool at the cross-company level — when you want to distinguish what's uniquely Amazon from what every company tests. That's noted as a future improvement once multi-company data is collected.
 
 ---
 
@@ -196,11 +200,11 @@ Adding a new company requires no code changes — companies are dynamic, stored 
 **Answer:**
 Two stand out. First, a silent deduplication bug in the InterviewBit scraper: the URL discovery function was adding URLs to a `seen_urls` set, so when the extraction function later tried to fetch the same URLs, they were already marked as seen and returned `None`. The scraper appeared to work but silently collected zero experiences. This was only caught by checking scraper performance stats in the pipeline output.
 
-Second, the TF-IDF sort problem I mentioned — I initially implemented pure discriminative sorting and it pushed Dynamic Programming and Arrays to the bottom of every company's results because they appear in all experiences. I had to redesign the sort as a blended rank after I saw the outputs and understood the underlying reason.
+Second, the scoring design problem I mentioned — I initially used IDF re-ranking (log N/df) and it pushed Dynamic Programming and Arrays to the bottom because they appear in all experiences. Within a single company's corpus, high document frequency is a positive signal, not a sign of genericness. I replaced IDF with a consistency score (df/N) that boosts rather than penalises universally present topics.
 
 ---
 
 ### Q10. How would you improve this system if you had more time?
 
 **Answer:**
-Three directions. First, **cross-company IDF**: right now IDF is computed within a single company's corpus. A truly discriminative score would use a global IDF across all companies so you can say "this topic is uniquely common at Amazon vs. the industry average". Second, **smarter NLP**: replace the handcrafted keyword dictionary with a fine-tuned NER model that can identify technical topics from text without needing explicit keyword lists. This would catch niche topics the dictionary misses. Third, **user personalisation**: let users mark topics as known or studied, and have the system adjust recommendations based on their current skill level, not just raw topic frequency from the corpus.
+Three directions. First, **cross-company IDF**: right now scoring is per-company only. A truly discriminative score would compute IDF across all companies — log(total_companies / companies_where_topic_appears) — so you can say "DP appears at Amazon AND Google AND Meta, so it's industry-wide; Leadership Principles appear only at Amazon, so that's Amazon-specific". That is the correct place for IDF in this system. Second, **smarter NLP**: replace the handcrafted keyword dictionary with a fine-tuned NER model that can identify technical topics from text without needing explicit keyword lists. This would catch niche topics the dictionary misses. Third, **user personalisation**: let users mark topics as known or studied, and have the system adjust recommendations based on their current skill level, not just raw topic frequency from the corpus.

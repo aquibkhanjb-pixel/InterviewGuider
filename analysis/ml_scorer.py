@@ -83,55 +83,49 @@ class SemanticConfidenceScorer:
 
 def tfidf_rerank(topic_insights: Dict, n_experiences: int) -> Dict:
     """
-    Annotates each topic with TF-IDF-derived fields and re-sorts using a
-    blended key so that both universally important topics AND company-specific
-    topics rank highly.
+    Re-ranks topics using consistency-boosted frequency scoring.
+
+    Within a single company's corpus, a topic appearing in MORE experiences is
+    MORE important — high document frequency is the signal, not noise. We
+    therefore use consistency_score = df / n_experiences which BOOSTS topics
+    that appear reliably across interviews instead of penalising them.
 
     Fields added to each topic:
-      idf               — log(N / df): how concentrated vs. spread this topic is
-      tfidf_score       — weighted_frequency × idf (raw signal)
-      discriminative_score — normalised 0-1 (how company-specific this topic is)
+      consistency_score  — df / n_experiences (0–1): how reliably this topic appears
+      frequency_score    — weighted_frequency × consistency_score
+      discriminative_score — alias for consistency_score (kept for frontend compat)
 
-    Sort key = 0.6 × freq_rank + 0.4 × disc_rank
-    This keeps "appears in every interview" topics near the top while still
-    boosting topics that are uniquely concentrated in this company's process.
-
-    NOTE: When cross-company corpora are available, replace the within-corpus
-    IDF here with a global IDF precomputed across all companies so the
-    discriminative_score truly reflects company-specific signal.
+    IDF (log N/df) belongs at the cross-company level, not within one company.
+    When experiences from multiple companies are available, replace
+    consistency_score with a global IDF so topics unique to this company are
+    boosted over universally common ones.
     """
     if not topic_insights or n_experiences < 2:
         for data in topic_insights.values():
-            data.setdefault('idf', 0.0)
-            data.setdefault('tfidf_score', 0.0)
-            data.setdefault('discriminative_score', 0.5)
+            data.setdefault('consistency_score', 1.0)
+            data.setdefault('frequency_score', 0.0)
+            data.setdefault('discriminative_score', 1.0)
         return topic_insights
 
-    # Compute raw IDF and TF-IDF
     for data in topic_insights.values():
         df = max(data.get('mentions_count', 1), 1)
-        idf = math.log(n_experiences / df)
-        data['idf'] = round(idf, 3)
-        data['tfidf_score'] = round(data.get('weighted_frequency', 0) * idf, 3)
+        consistency = round(min(df / n_experiences, 1.0), 3)
+        data['consistency_score'] = consistency
+        data['frequency_score'] = round(data.get('weighted_frequency', 0) * consistency, 3)
+        data['discriminative_score'] = consistency  # frontend compat
 
-    # Normalise discriminative_score to [0, 1]
-    max_tfidf = max((d['tfidf_score'] for d in topic_insights.values()), default=1) or 1
-    for data in topic_insights.values():
-        data['discriminative_score'] = round(data['tfidf_score'] / max_tfidf, 3)
-
-    # Build blended sort key: rank by frequency (primary) boosted by discriminative signal
     items = list(topic_insights.items())
     n = len(items)
 
     freq_order = sorted(range(n), key=lambda i: items[i][1].get('weighted_frequency', 0), reverse=True)
-    disc_order = sorted(range(n), key=lambda i: items[i][1].get('discriminative_score', 0), reverse=True)
+    cons_order = sorted(range(n), key=lambda i: items[i][1].get('consistency_score', 0), reverse=True)
 
     freq_rank = [0] * n
-    disc_rank = [0] * n
+    cons_rank = [0] * n
     for rank, idx in enumerate(freq_order):
         freq_rank[idx] = rank
-    for rank, idx in enumerate(disc_order):
-        disc_rank[idx] = rank
+    for rank, idx in enumerate(cons_order):
+        cons_rank[idx] = rank
 
-    blended = sorted(range(n), key=lambda i: 0.6 * freq_rank[i] + 0.4 * disc_rank[i])
+    blended = sorted(range(n), key=lambda i: 0.6 * freq_rank[i] + 0.4 * cons_rank[i])
     return dict(items[i] for i in blended)
