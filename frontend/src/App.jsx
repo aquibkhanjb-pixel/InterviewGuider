@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { CssBaseline, Box, Alert, Snackbar } from '@mui/material';
+import { CssBaseline, Box, Alert, Snackbar, CircularProgress, Typography } from '@mui/material';
 import Dashboard from './components/Dashboard/Dashboard.jsx';
 import CompanyComparison from './components/CompanyComparison/CompanyComparison.jsx';
 import { interviewAPI } from './services/api.js';
@@ -132,9 +132,17 @@ function App() {
       <CssBaseline />
       <Router>
         <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default' }}>
+          {apiHealthy === null && (
+            <Box display="flex" alignItems="center" justifyContent="center" sx={{ py: 1, bgcolor: '#fff8e1' }}>
+              <CircularProgress size={16} sx={{ mr: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                Connecting to backend — Render free tier may take up to 30 s to wake up…
+              </Typography>
+            </Box>
+          )}
           {apiHealthy === false && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              Backend API is not accessible. Ensure the server is running at {API_URL}
+            <Alert severity="warning" sx={{ mb: 0 }}>
+              Backend is not responding. It may still be waking up — please wait 30 s and refresh.
             </Alert>
           )}
           

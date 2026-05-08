@@ -5,7 +5,6 @@ import {
   Box,
   Button,
   CircularProgress,
-  Alert,
   Grid,
   Card,
   CardContent,
@@ -15,7 +14,7 @@ import {
   Toolbar,
   Paper
 } from '@mui/material';
-import { Refresh, Analytics, TrendingUp, Compare } from '@mui/icons-material';
+import { Refresh, Analytics, Compare } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import CompanySelector from '../CompanySelector/CompanySelector.jsx';
 import InsightsChart from '../InsightsChart/InsightsChart.jsx';
@@ -24,7 +23,7 @@ import ExperiencesList from '../ExperiencesList/ExperiencesList.jsx';
 import { interviewAPI } from '../../services/api.js';
 
 const Dashboard = ({ onNotification }) => {
-  const [selectedCompanies, setSelectedCompanies] = useState(['Amazon']);
+  const [selectedCompanies, setSelectedCompanies] = useState([]);
   const [insights, setInsights] = useState({});
   const [loading, setLoading] = useState(false);
   const [analysisLoading, setAnalysisLoading] = useState({});
@@ -38,43 +37,46 @@ const Dashboard = ({ onNotification }) => {
       .catch(() => {});
   }, []);
 
-  // Auto-load insights when selection changes — but only for companies that have data
+  // Auto-load insights only when the user actively selects companies that already have data.
+  // An empty initial selection ensures no API call fires on page load.
   useEffect(() => {
-    if (selectedCompanies.length > 0) {
-      loadInsights();
-    }
+    if (selectedCompanies.length === 0) return;
+    loadInsights(selectedCompanies);
   }, [selectedCompanies]);
 
   const loadInsights = async (companiesToLoad = selectedCompanies) => {
     setLoading(true);
-    const newInsights = { ...insights };
-
-    // Re-fetch companies list so we have fresh experience counts
-    let withData = new Set();
     try {
-      const res = await interviewAPI.getCompanies();
-      const list = res.data.companies || [];
-      setCompaniesData(list);
-      withData = new Set(list.filter(c => c.experience_count > 0).map(c => c.name));
-    } catch (_) { /* non-fatal — fall through and call insights anyway */ }
-
-    for (const company of companiesToLoad) {
-      // If we know the company has no data, skip the ML call immediately
-      if (withData.size > 0 && !withData.has(company)) {
-        newInsights[company] = { status: 'no_data', company };
-        continue;
-      }
+      // Re-fetch companies list so we have fresh experience counts
+      let withData = new Set();
       try {
-        const response = await interviewAPI.getCompanyInsights(company);
-        newInsights[company] = response.data;
-      } catch (error) {
-        console.error(`Error loading insights for ${company}:`, error);
-        onNotification(`Failed to load insights for ${company}. Try running analysis first.`, 'warning');
-      }
-    }
+        const res = await interviewAPI.getCompanies();
+        const list = res.data.companies || [];
+        setCompaniesData(list);
+        withData = new Set(list.filter(c => c.experience_count > 0).map(c => c.name));
+      } catch (_) { /* non-fatal — fall through and call insights anyway */ }
 
-    setInsights(newInsights);
-    setLoading(false);
+      // Collect results for just the requested companies (functional update preserves the rest)
+      const fetched = {};
+      for (const company of companiesToLoad) {
+        // If we know the company has no data, skip the ML call immediately
+        if (withData.size > 0 && !withData.has(company)) {
+          fetched[company] = { status: 'no_data', company };
+          continue;
+        }
+        try {
+          const response = await interviewAPI.getCompanyInsights(company);
+          fetched[company] = response.data;
+        } catch (error) {
+          console.error(`Error loading insights for ${company}:`, error);
+          onNotification(`Failed to load insights for ${company}. Try running analysis first.`, 'warning');
+        }
+      }
+
+      setInsights(prev => ({ ...prev, ...fetched }));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const triggerAnalysis = async (company) => {
