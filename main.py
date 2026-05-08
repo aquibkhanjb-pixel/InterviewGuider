@@ -25,8 +25,12 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(app_config)
     
-    # Enable CORS
-    CORS(app, origins=["https://interviewguider.onrender.com", "http://localhost:5173"])
+    # Enable CORS — allow Vercel frontend (any subdomain) and local dev
+    CORS(app, origins=[
+        r"https://.*\.vercel\.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ])
     
     # Initialize database
     db.init_app(app)
@@ -85,7 +89,7 @@ def create_app():
             }
         })
     
-    @app.route('/api/health')
+    @app.route('/api/health', strict_slashes=False)
     def health():
         from database.connection import db_manager
         health_status = db_manager.health_check()
