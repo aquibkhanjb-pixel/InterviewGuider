@@ -28,37 +28,53 @@ const Dashboard = ({ onNotification }) => {
   const [insights, setInsights] = useState({});
   const [loading, setLoading] = useState(false);
   const [analysisLoading, setAnalysisLoading] = useState({});
+  const [companiesData, setCompaniesData] = useState([]);
   const navigate = useNavigate();
 
+  // Fetch companies list once on mount so we know which have data
+  useEffect(() => {
+    interviewAPI.getCompanies()
+      .then(res => setCompaniesData(res.data.companies || []))
+      .catch(() => {});
+  }, []);
+
+  // Auto-load insights when selection changes — but only for companies that have data
   useEffect(() => {
     if (selectedCompanies.length > 0) {
       loadInsights();
     }
   }, [selectedCompanies]);
 
-  const loadInsights = async () => {
+  const loadInsights = async (companiesToLoad = selectedCompanies) => {
     setLoading(true);
-    const newInsights = {};
+    const newInsights = { ...insights };
 
+    // Re-fetch companies list so we have fresh experience counts
+    let withData = new Set();
     try {
-      for (const company of selectedCompanies) {
-        try {
-          const response = await interviewAPI.getCompanyInsights(company);
-          newInsights[company] = response.data;
-          console.log(`Loaded insights for ${company}:`, response.data);
-        } catch (error) {
-          console.error(`Error loading insights for ${company}:`, error);
-          onNotification(`Failed to load insights for ${company}. Try running analysis first.`, 'warning');
-        }
+      const res = await interviewAPI.getCompanies();
+      const list = res.data.companies || [];
+      setCompaniesData(list);
+      withData = new Set(list.filter(c => c.experience_count > 0).map(c => c.name));
+    } catch (_) { /* non-fatal — fall through and call insights anyway */ }
+
+    for (const company of companiesToLoad) {
+      // If we know the company has no data, skip the ML call immediately
+      if (withData.size > 0 && !withData.has(company)) {
+        newInsights[company] = { status: 'no_data', company };
+        continue;
       }
-      
-      setInsights(newInsights);
-    } catch (error) {
-      console.error('Error loading insights:', error);
-      onNotification('Failed to load insights', 'error');
-    } finally {
-      setLoading(false);
+      try {
+        const response = await interviewAPI.getCompanyInsights(company);
+        newInsights[company] = response.data;
+      } catch (error) {
+        console.error(`Error loading insights for ${company}:`, error);
+        onNotification(`Failed to load insights for ${company}. Try running analysis first.`, 'warning');
+      }
     }
+
+    setInsights(newInsights);
+    setLoading(false);
   };
 
   const triggerAnalysis = async (company) => {
@@ -104,7 +120,7 @@ const Dashboard = ({ onNotification }) => {
                   'success'
                 );
               }
-              setTimeout(() => loadInsights(), 800);
+              setTimeout(() => loadInsights([company]), 800);
               resolve();
             } else if (status === 'failed') {
               clearInterval(interval);
@@ -220,13 +236,13 @@ const Dashboard = ({ onNotification }) => {
                         <Typography variant="body2" color="textSecondary" gutterBottom>
                           High Priority Topics: {summary.highPriority}
                         </Typography>
-                        
+
                         <Typography variant="body2" gutterBottom sx={{ mt: 2 }}>
                           Top Focus Areas:
                         </Typography>
                         <Box>
                           {summary.topTopics.map((topic, index) => (
-                            <Chip 
+                            <Chip
                               key={index}
                               label={topic}
                               size="small"
@@ -237,9 +253,9 @@ const Dashboard = ({ onNotification }) => {
                         </Box>
                       </Box>
                     ) : (
-                      <Alert severity="info" sx={{ mt: 2 }}>
-                        No insights available. Run analysis to generate insights.
-                      </Alert>
+                      <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+                        No data yet. Click <strong>Run Analysis</strong> to collect interview experiences.
+                      </Typography>
                     )}
                   </CardContent>
                   

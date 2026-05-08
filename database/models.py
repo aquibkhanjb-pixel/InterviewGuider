@@ -110,6 +110,23 @@ class TopicMention(db.Model):
     def __repr__(self):
         return f"<TopicMention(topic='{self.topic.name if self.topic else 'Unknown'}')>"
 
+class AnalysisJob(db.Model):
+    """Persisted job store so any gunicorn worker can read any job's status."""
+    __tablename__ = 'analysis_jobs'
+
+    id = Column(String(12), primary_key=True)
+    company = Column(String(100), nullable=False)
+    status = Column(String(20), default='queued', nullable=False, index=True)
+    error = Column(Text, nullable=True)
+    result_json = Column(Text, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<AnalysisJob(id='{self.id}', status='{self.status}')>"
+
+
 class CompanyInsight(db.Model):
     __tablename__ = 'company_insights'
     

@@ -1,7 +1,9 @@
 """
 Analysis routes - async background scraping + polling.
+Jobs are stored in the database so any gunicorn worker can read them.
 """
 
+import json
 import threading
 import uuid
 import logging
@@ -9,24 +11,45 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify
 from database.connection import db_manager
-from database.models import Company, InterviewExperience
+from database.models import Company, InterviewExperience, AnalysisJob
 
 analysis_bp = Blueprint('analysis', __name__)
 logger = logging.getLogger(__name__)
 
-# In-memory job store  {job_id: {status, company, result, error, started_at}}
-_jobs: dict = {}
-_jobs_lock = threading.Lock()
-
 
 def _set_job(job_id: str, **kwargs):
-    with _jobs_lock:
-        _jobs[job_id] = {**_jobs.get(job_id, {}), **kwargs}
+    """Upsert job fields in the database."""
+    with db_manager.get_session() as session:
+        job = session.get(AnalysisJob, job_id)
+        if job is None:
+            job = AnalysisJob(id=job_id)
+            session.add(job)
+        for key, value in kwargs.items():
+            if key == 'result':
+                job.result_json = json.dumps(value)
+            elif key == 'started_at' and isinstance(value, str):
+                job.started_at = datetime.fromisoformat(value)
+            elif key == 'finished_at' and isinstance(value, str):
+                job.finished_at = datetime.fromisoformat(value)
+            elif hasattr(job, key):
+                setattr(job, key, value)
+        session.commit()
 
 
-def _get_job(job_id: str):
-    with _jobs_lock:
-        return dict(_jobs.get(job_id, {}))
+def _get_job(job_id: str) -> dict:
+    """Read job from database. Returns {} if not found."""
+    with db_manager.get_session() as session:
+        job = session.get(AnalysisJob, job_id)
+        if job is None:
+            return {}
+        return {
+            'status':      job.status,
+            'company':     job.company,
+            'error':       job.error,
+            'started_at':  job.started_at.isoformat() if job.started_at else None,
+            'finished_at': job.finished_at.isoformat() if job.finished_at else None,
+            'result':      json.loads(job.result_json) if job.result_json else None,
+        }
 
 
 def _ensure_company(company_name: str):
@@ -130,9 +153,9 @@ def get_job_status(job_id):
         return jsonify({'status': 'error', 'error': 'Job not found'}), 404
 
     response = {
-        'job_id': job_id,
-        'status': job.get('status'),
-        'company': job.get('company'),
+        'job_id':     job_id,
+        'status':     job.get('status'),
+        'company':    job.get('company'),
         'started_at': job.get('started_at'),
     }
     if job.get('status') == 'completed':
