@@ -99,7 +99,17 @@ const Dashboard = ({ onNotification }) => {
         }
         try {
           const response = await interviewAPI.getCompanyInsights(canonicalName);
-          fetched[company] = response.data;
+          // Backend may return 200 with an error body when ML analysis throws.
+          // Don't overwrite valid insights with an error object.
+          if (response.data?.error) {
+            console.error(`Insights error for ${company}:`, response.data.error);
+            onNotification(
+              `Could not generate insights for ${company} — ${response.data.message || 'server error'}. Try again shortly.`,
+              'warning'
+            );
+          } else {
+            fetched[company] = response.data;
+          }
         } catch (error) {
           console.error(`Error loading insights for ${company}:`, error);
           onNotification(`Failed to load insights for ${company}. Try running analysis first.`, 'warning');
@@ -117,27 +127,35 @@ const Dashboard = ({ onNotification }) => {
     onNotification(`Scraping started for ${company}. This may take 1–2 minutes…`, 'info');
 
     try {
-      // Start the background job
+      // Use force_refresh + higher max when updating existing data so scrapers
+      // explore more pages and aren't skipped because existing_count >= max.
+      const existingEntry = companiesData.find(
+        c => c.name.toLowerCase() === company.toLowerCase()
+      );
+      const hasExistingData = (existingEntry?.experience_count ?? 0) > 0;
+
       const startRes = await interviewAPI.triggerAnalysis(company, {
-        max_experiences: 20,
-        force_refresh: false
+        max_experiences: 50,            // 50/6 scrapers ≈ 8 each → explores more pages
+        force_refresh: hasExistingData  // always run scrapers when updating
       });
 
       const jobId = startRes.data.job_id;
       if (!jobId) throw new Error('No job ID returned from server');
 
-      // Poll every 6 seconds until done or failed
+      // Poll every 6 seconds. Outcome variables are set here, notifications sent
+      // after the Promise so loadInsights() runs in the main async flow — not
+      // buried inside setTimeout/setInterval where stale closures can bite.
+      let jobTotal = 0;
+      let jobScraped = 0;
+      let timedOut = false;
+
       await new Promise((resolve, reject) => {
-        const maxWaitMs = 5 * 60 * 1000; // 5 minutes
+        const maxWaitMs = 5 * 60 * 1000;
         const startedAt = Date.now();
         const interval = setInterval(async () => {
           if (Date.now() - startedAt > maxWaitMs) {
             clearInterval(interval);
-            onNotification(
-              `${company} is taking longer than usual — the scraper continues in the background. Click "Update Data" in a minute to check.`,
-              'info'
-            );
-            setTimeout(() => loadInsights([company]), 1000);
+            timedOut = true;
             resolve();
             return;
           }
@@ -147,38 +165,43 @@ const Dashboard = ({ onNotification }) => {
 
             if (status === 'completed') {
               clearInterval(interval);
-              const total = result?.data_collection?.total_experiences || 0;
-              const scraped = result?.data_collection?.newly_scraped || 0;
-              if (total === 0) {
-                onNotification(
-                  `No interview experiences found for ${company}. The company may not have public data on supported platforms yet.`,
-                  'warning'
-                );
-              } else {
-                onNotification(
-                  `Analysis done for ${company}! ${scraped} new experiences scraped (${total} total).`,
-                  'success'
-                );
-              }
-              // Use the same key as in selectedCompanies so insights[company] is found on render.
-              // loadInsights() resolves the canonical DB name internally via companyMap.
-              setTimeout(() => loadInsights([company]), 800);
+              jobTotal  = result?.data_collection?.total_experiences ?? 0;
+              jobScraped = result?.data_collection?.newly_scraped    ?? 0;
               resolve();
             } else if (status === 'failed') {
               clearInterval(interval);
               reject(new Error(error || 'Pipeline failed'));
             }
-            // status === 'running' or 'queued' → keep polling
+            // 'running' / 'queued' → keep polling
           } catch (pollErr) {
-            // 404 can happen transiently; keep polling unless it's a hard failure
             const is404 = pollErr?.response?.status === 404;
-            if (!is404) {
-              clearInterval(interval);
-              reject(pollErr);
-            }
+            if (!is404) { clearInterval(interval); reject(pollErr); }
           }
         }, 6000);
       });
+
+      // Notify after polling so we're back in normal async flow
+      if (timedOut) {
+        onNotification(
+          `${company} is taking longer than usual — scraper continues in the background. Click "Update Data" to check.`,
+          'info'
+        );
+      } else if (jobTotal === 0) {
+        onNotification(
+          `No interview experiences found for ${company}. The company may not have public data on supported platforms yet.`,
+          'warning'
+        );
+      } else {
+        onNotification(
+          `Analysis done for ${company}! ${jobScraped} new experiences scraped (${jobTotal} total).`,
+          'success'
+        );
+      }
+
+      // Load insights in the main async flow — no setTimeout/stale-closure risk.
+      // Small pause so any in-flight DB writes on the backend have time to commit.
+      await new Promise(r => setTimeout(r, 1500));
+      await loadInsights([company]);
 
     } catch (error) {
       console.error(`Analysis error for ${company}:`, error);
