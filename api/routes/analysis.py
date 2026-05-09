@@ -181,6 +181,52 @@ def get_job_status(job_id):
     if not job:
         return jsonify({'status': 'error', 'error': 'Job not found'}), 404
 
+    # Auto-resolve jobs stuck in "running" for > 8 minutes.
+    # Render free tier can kill daemon threads (OOM/restart) leaving jobs in limbo.
+    # We mark them completed with whatever count is now in the DB so the frontend
+    # can proceed to loadInsights() and show any data that was saved before death.
+    if job.get('status') == 'running' and job.get('started_at'):
+        try:
+            started = datetime.fromisoformat(str(job['started_at']).replace('Z', ''))
+            elapsed = (datetime.utcnow() - started).total_seconds()
+            if elapsed > 480:
+                company_name = job.get('company', '')
+                total = 0
+                with db_manager.get_session() as session:
+                    co = session.query(Company).filter(
+                        Company.name.ilike(company_name)
+                    ).first()
+                    if co:
+                        total = session.query(InterviewExperience).filter(
+                            InterviewExperience.company_id == co.id
+                        ).count()
+                _set_job(job_id,
+                    status='completed',
+                    finished_at=datetime.utcnow().isoformat(),
+                    result={
+                        'status': 'timeout_recovery',
+                        'company': company_name,
+                        'data_collection': {
+                            'total_experiences': total,
+                            'newly_scraped': 0,
+                            'scrapers_used': [],
+                            'platforms_breakdown': {},
+                            'time_taken': f'{elapsed:.0f}s'
+                        },
+                        'analysis_metadata': {
+                            'topics_identified': 0,
+                            'insights_generated': 0,
+                            'stages_completed': [],
+                            'timestamp': datetime.utcnow().isoformat()
+                        }
+                    }
+                )
+                job = _get_job(job_id)
+                logger.info(f"Auto-resolved stale job {job_id} for {company_name} "
+                            f"(elapsed {elapsed:.0f}s, total_experiences={total})")
+        except Exception as e:
+            logger.warning(f"Could not auto-resolve stale job {job_id}: {e}")
+
     response = {
         'job_id':     job_id,
         'status':     job.get('status'),

@@ -135,8 +135,8 @@ const Dashboard = ({ onNotification }) => {
       const hasExistingData = (existingEntry?.experience_count ?? 0) > 0;
 
       const startRes = await interviewAPI.triggerAnalysis(company, {
-        max_experiences: 50,            // 50/6 scrapers ≈ 8 each → explores more pages
-        force_refresh: hasExistingData  // always run scrapers when updating
+        max_experiences: 25,   // 25/6 scrapers ≈ 4 each — safe for Render free tier
+        force_refresh: false   // pipeline runs scrapers when existing_count < max
       });
 
       const jobId = startRes.data.job_id;
